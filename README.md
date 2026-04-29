@@ -3,10 +3,15 @@
    <strong>English</strong> | <a href="./.github/README.cn.md">中文</a> | <a href="./.github/README.jp.md">日本語</a>
 </p>
 
+> [!IMPORTANT]
+> :rocket: Gateway 2.0 (Pre-Release) Portkey's core enterprise gateway is merging into open-source with our 2.0 release. You can try the pre-release branch [here](https://github.com/portkey-ai/gateway/tree/2.0.0).
+> Read more about what's next for Portkey in our [**Series A announcement**](https://portkey.wiki/rohit-a).
+
+
 <div align="center">
 
-<a href="https://portkey.sh/report-github"><img src="https://raw.githubusercontent.com/siddharthsambharia-portkey/Portkey-Product-Images/refs/heads/main/LLM%20Report%20Campaign%20Frame.png"></img></a>
-<br>
+🆕 **[Portkey Models](https://github.com/Portkey-AI/models)** - Open-source LLM pricing for 2,300+ models across 40+ providers. [Explore →](https://portkey.ai/models)
+
 
 # AI Gateway
 #### Route to 250+ LLMs with 1 fast & friendly API
@@ -41,7 +46,8 @@ The [**AI Gateway**](https://portkey.wiki/gh-10) is designed for fast, reliable 
 - Scale AI apps with **[load balancing](https://portkey.wiki/gh-13)** and **[conditional routing](https://portkey.wiki/gh-14)**
 - Protect your AI deployments with **[guardrails](https://portkey.wiki/gh-15)**
 - Go beyond text with **[multi-modal capabilities](https://portkey.wiki/gh-16)**
-- Finally, explore **[agentic workflow](https://portkey.wiki/gh-17)** integrations
+- Explore **[agentic workflow](https://portkey.wiki/gh-17)** integrations
+- Manage MCP servers with enterprise auth & observability using **[MCP Gateway](https://portkey.ai/docs/product/mcp-gateway)**
 
 <br><br>
 
@@ -167,34 +173,20 @@ The enterprise deployment architecture for supported platforms is available here
 
 <a href="https://portkey.sh/demo-13"><img src="https://portkey.ai/blog/content/images/2024/08/Get-API-Key--5-.png" height=50 alt="Book an enterprise AI gateway demo" /></a><br/>
 
-
 <br>
 
-<hr>
+## MCP Gateway
 
-### AI Engineering Hours
+[MCP Gateway](https://portkey.ai/docs/product/mcp-gateway) provides a centralized control plane for managing MCP (Model Context Protocol) servers across your organization.
 
-Join weekly community calls every Friday (8 AM PT) to kickstart your AI Gateway implementation! [Happening every Friday](https://portkey.wiki/gh-35)
+- **Authentication** — Single auth layer at the gateway. Users authenticate once; your MCP servers receive verified requests
+- **Access Control** — Control which teams and users can access which servers and tools. Revoke access instantly
+- **Observability** — Every tool call logged with full context: who called what, parameters, response, latency
+- **Identity Forwarding** — Forward user identity (email, team, roles) to MCP servers automatically
 
-<a href="https://portkey.wiki/gh-35"><img width="500" src="https://github.com/user-attachments/assets/c2885699-f197-4289-b819-21eb839fbae1" /></a>
+Works with Claude Desktop, Cursor, VS Code, and any MCP-compatible client. [Get started →](https://portkey.ai/docs/product/mcp-gateway/quickstart)
 
-Minutes of Meetings [published here](https://portkey.wiki/gh-36).
-
-
-<hr>
-
-### LLMs in Prod'25
-
-Insights from analyzing 2 trillion+ tokens, across 90+ regions and 650+ teams in production. What to expect from this report:
-- Trends shaping AI adoption and LLM provider growth.
-- Benchmarks to optimize speed, cost and reliability.
-- Strategies to scale production-grade AI systems.
-
-<a href="https://portkey.sh/report-github"><img width="500" src="https://raw.githubusercontent.com/siddharthsambharia-portkey/Portkey-Product-Images/refs/heads/main/LLM%20Report%20Campaign%20Image.png" /></a>
-
-<a href="https://portkey.sh/report-github">**Get the Report**</a>
-<hr>
-
+<br>
 
 ## Core Features
 ### Reliable Routing
@@ -224,6 +216,13 @@ Insights from analyzing 2 trillion+ tokens, across 90+ regions and 650+ teams in
 <sup>
 *&nbsp;Available in hosted and enterprise versions
 </sup>
+
+<br>
+
+## Portkey Models
+Open-source LLM pricing database for 40+ providers - used by the Gateway for cost tracking.
+
+[GitHub](https://github.com/Portkey-AI/models) | [Model Explorer](https://portkey.ai/models)
 
 <br>
 
