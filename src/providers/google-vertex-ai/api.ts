@@ -5,7 +5,8 @@ import { getModelAndProvider, getAccessToken, getBucketAndFile } from './utils';
 import {
   applyCachedContent,
   ensureCachedContent,
-  hasCacheControl,
+  isExplicitCachingEligible,
+  markCacheCreated,
   splitTransformedBody,
 } from './cachedContents';
 
@@ -89,7 +90,7 @@ export const GoogleApiConfig: ProviderAPIConfig = {
     // Any failure leaves the body untouched (request proceeds uncached).
     if (
       (fn === 'chatComplete' || fn === 'stream-chatComplete') &&
-      hasCacheControl(gatewayRequestBody) &&
+      isExplicitCachingEligible(gatewayRequestBody) &&
       transformedRequestBody
     ) {
       try {
@@ -110,7 +111,7 @@ export const GoogleApiConfig: ProviderAPIConfig = {
               vertexRegion === 'global'
                 ? 'https://aiplatform.googleapis.com'
                 : `https://${vertexRegion}-aiplatform.googleapis.com`;
-            const resourceName = await ensureCachedContent({
+            const { name: resourceName, created } = await ensureCachedContent({
               baseURL,
               projectId: projectId as string,
               region: vertexRegion as string,
@@ -123,6 +124,12 @@ export const GoogleApiConfig: ProviderAPIConfig = {
               resourceName,
               split.suffix
             );
+            // The creating request is billed the whole prefix at the standard
+            // input rate by Google, so flag it to zero cached_tokens in the
+            // response transform (see cachedContents.ts billing note).
+            if (created) {
+              markCacheCreated(gatewayRequestBody as any);
+            }
           }
         }
       } catch (err) {
