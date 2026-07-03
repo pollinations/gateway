@@ -487,6 +487,7 @@ describe('response transform cached_tokens billing', () => {
     );
     expect(result.usage.prompt_tokens_details.cached_tokens).toBe(18000);
     expect(result.usage.prompt_tokens).toBe(20000);
+    expect(result.usage.cache_creation_input_tokens).toBeUndefined();
   });
 
   it('zeroes cached_tokens when the request created the cache (non-stream)', () => {
@@ -505,6 +506,9 @@ describe('response transform cached_tokens billing', () => {
     );
     expect(result.usage.prompt_tokens_details.cached_tokens).toBe(0);
     expect(result.usage.prompt_tokens).toBe(20000);
+    // The written prefix is reported so downstream billing prices the
+    // create + cache storage explicitly.
+    expect(result.usage.cache_creation_input_tokens).toBe(18000);
   });
 
   const parseStreamUsage = (out: string) => {
@@ -531,9 +535,9 @@ describe('response transform cached_tokens billing', () => {
       true,
       gatewayRequest
     );
-    expect(parseStreamUsage(out).prompt_tokens_details.cached_tokens).toBe(
-      18000
-    );
+    const usage = parseStreamUsage(out);
+    expect(usage.prompt_tokens_details.cached_tokens).toBe(18000);
+    expect(usage.cache_creation_input_tokens).toBeUndefined();
   });
 
   it('zeroes cached_tokens in stream chunks when created', () => {
@@ -548,6 +552,8 @@ describe('response transform cached_tokens billing', () => {
       true,
       gatewayRequest
     );
-    expect(parseStreamUsage(out).prompt_tokens_details.cached_tokens).toBe(0);
+    const usage = parseStreamUsage(out);
+    expect(usage.prompt_tokens_details.cached_tokens).toBe(0);
+    expect(usage.cache_creation_input_tokens).toBe(18000);
   });
 });

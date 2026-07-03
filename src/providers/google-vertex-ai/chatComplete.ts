@@ -687,6 +687,13 @@ export const GoogleChatCompleteResponseTransform: (
                         : cachedContentTokenCount,
                     audio_tokens: inputAudioTokens,
                 },
+                // Report the written prefix on the creating request so
+                // downstream billing can price the create and its cache
+                // storage explicitly (Anthropic usage convention).
+                ...(wasCacheCreated(gatewayRequest) &&
+                cachedContentTokenCount > 0
+                    ? { cache_creation_input_tokens: cachedContentTokenCount }
+                    : {}),
             },
         };
     }
@@ -813,6 +820,16 @@ export const GoogleChatCompleteStreamChunkTransform: (
                         0,
                     ),
             },
+            // Report the written prefix on the creating request so downstream
+            // billing can price the create and its cache storage explicitly
+            // (Anthropic usage convention).
+            ...(wasCacheCreated(gatewayRequest) &&
+            (parsedChunk.usageMetadata.cachedContentTokenCount ?? 0) > 0
+                ? {
+                      cache_creation_input_tokens:
+                          parsedChunk.usageMetadata.cachedContentTokenCount,
+                  }
+                : {}),
         };
     }
 
