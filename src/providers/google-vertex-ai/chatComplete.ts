@@ -42,6 +42,7 @@ import {
     transformFinishReason,
 } from "../utils";
 import { transformGenerationConfig } from "./transformGenerationConfig";
+import { wasCacheCreated } from "./cachedContents";
 import {
     GoogleErrorResponse,
     GoogleGenerateContentResponse,
@@ -497,11 +498,15 @@ export const GoogleChatCompleteResponseTransform: (
     responseStatus: number,
     responseHeaders: Headers,
     strictOpenAiCompliance: boolean,
+    gatewayRequestUrl?: string,
+    gatewayRequest?: Params,
 ) => ChatCompletionResponse | ErrorResponse = (
     response,
     responseStatus,
     _responseHeaders,
     strictOpenAiCompliance,
+    _gatewayRequestUrl,
+    gatewayRequest,
 ) => {
     // when error occurs on streaming request, the response is an array of errors.
     if (
@@ -674,9 +679,21 @@ export const GoogleChatCompleteResponseTransform: (
                     audio_tokens: outputAudioTokens,
                 },
                 prompt_tokens_details: {
-                    cached_tokens: cachedContentTokenCount,
+                    // The request that created the cachedContents resource is
+                    // billed the whole prefix at the standard input rate, so
+                    // zero the cached discount for it (see cachedContents.ts).
+                    cached_tokens: wasCacheCreated(gatewayRequest)
+                        ? 0
+                        : cachedContentTokenCount,
                     audio_tokens: inputAudioTokens,
                 },
+                // Report the written prefix on the creating request so
+                // downstream billing can price the create and its cache
+                // storage explicitly (Anthropic usage convention).
+                ...(wasCacheCreated(gatewayRequest) &&
+                cachedContentTokenCount > 0
+                    ? { cache_creation_input_tokens: cachedContentTokenCount }
+                    : {}),
             },
         };
     }
@@ -746,11 +763,13 @@ export const GoogleChatCompleteStreamChunkTransform: (
     fallbackId: string,
     streamState: any,
     strictOpenAiCompliance: boolean,
+    gatewayRequest?: Params,
 ) => string = (
     responseChunk,
     fallbackId,
     streamState,
     strictOpenAiCompliance,
+    gatewayRequest,
 ) => {
     streamState.containsChainOfThoughtMessage =
         streamState?.containsChainOfThoughtMessage ?? false;
@@ -785,8 +804,12 @@ export const GoogleChatCompleteStreamChunkTransform: (
                     ),
             },
             prompt_tokens_details: {
-                cached_tokens:
-                    parsedChunk.usageMetadata.cachedContentTokenCount,
+                // Zero the cached discount on the cache-creating request; it is
+                // billed the whole prefix at the standard input rate (see
+                // cachedContents.ts).
+                cached_tokens: wasCacheCreated(gatewayRequest)
+                    ? 0
+                    : parsedChunk.usageMetadata.cachedContentTokenCount,
                 audio_tokens:
                     parsedChunk.usageMetadata?.promptTokensDetails?.reduce(
                         (acc, curr) => {
@@ -797,6 +820,16 @@ export const GoogleChatCompleteStreamChunkTransform: (
                         0,
                     ),
             },
+            // Report the written prefix on the creating request so downstream
+            // billing can price the create and its cache storage explicitly
+            // (Anthropic usage convention).
+            ...(wasCacheCreated(gatewayRequest) &&
+            (parsedChunk.usageMetadata.cachedContentTokenCount ?? 0) > 0
+                ? {
+                      cache_creation_input_tokens:
+                          parsedChunk.usageMetadata.cachedContentTokenCount,
+                  }
+                : {}),
         };
     }
 

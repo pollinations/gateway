@@ -2,6 +2,13 @@ import { GatewayError } from '../../errors/GatewayError';
 import { Options } from '../../types/requestBody';
 import { endpointStrings, ProviderAPIConfig } from '../types';
 import { getModelAndProvider, getAccessToken, getBucketAndFile } from './utils';
+import {
+  applyCachedContent,
+  ensureCachedContent,
+  isExplicitCachingEligible,
+  markCacheCreated,
+  splitTransformedBody,
+} from './cachedContents';
 
 const getApiVersion = (provider: string) => {
   if (provider === 'meta') return 'v1beta1';
@@ -64,12 +71,74 @@ export const GoogleApiConfig: ProviderAPIConfig = {
 
     return `https://${vertexRegion}-aiplatform.googleapis.com`;
   },
-  headers: async ({ c, providerOptions, gatewayRequestBody }) => {
+  headers: async ({
+    c,
+    providerOptions,
+    fn,
+    transformedRequestBody,
+    gatewayRequestBody,
+  }) => {
     const { apiKey, vertexServiceAccountJson } = providerOptions;
     let authToken = apiKey;
     if (vertexServiceAccountJson) {
       authToken = await getAccessToken(c, vertexServiceAccountJson);
     }
+
+    // Explicit context caching for Gemini (cache_control markers). Runs here
+    // because headers() is async and receives the live transformedRequestBody
+    // reference before it is serialized, so mutations land in the sent body.
+    // Any failure leaves the body untouched (request proceeds uncached).
+    if (
+      (fn === 'chatComplete' || fn === 'stream-chatComplete') &&
+      isExplicitCachingEligible(gatewayRequestBody) &&
+      transformedRequestBody
+    ) {
+      try {
+        const inputModel = (gatewayRequestBody as any)?.model as string;
+        const { provider, model } = getModelAndProvider(inputModel ?? '');
+        if (provider === 'google') {
+          const split = splitTransformedBody(
+            gatewayRequestBody as any,
+            transformedRequestBody
+          );
+          if (split) {
+            const { vertexRegion } = providerOptions;
+            let projectId = providerOptions.vertexProjectId;
+            if (vertexServiceAccountJson?.project_id) {
+              projectId = vertexServiceAccountJson.project_id;
+            }
+            const baseURL =
+              vertexRegion === 'global'
+                ? 'https://aiplatform.googleapis.com'
+                : `https://${vertexRegion}-aiplatform.googleapis.com`;
+            const { name: resourceName, created } = await ensureCachedContent({
+              baseURL,
+              projectId: projectId as string,
+              region: vertexRegion as string,
+              model,
+              prefix: split.prefix,
+              authToken: authToken as string,
+            });
+            applyCachedContent(
+              transformedRequestBody,
+              resourceName,
+              split.suffix
+            );
+            // The creating request is billed the whole prefix at the standard
+            // input rate by Google, so flag it to zero cached_tokens in the
+            // response transform (see cachedContents.ts billing note).
+            if (created) {
+              markCacheCreated(gatewayRequestBody as any);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `vertex explicit caching skipped: ${(err as Error)?.message ?? err}`
+        );
+      }
+    }
+
     const anthropicBeta =
       providerOptions?.['anthropicBeta'] ??
       gatewayRequestBody?.['anthropic_beta'];
