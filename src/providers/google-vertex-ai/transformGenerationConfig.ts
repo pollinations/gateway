@@ -53,10 +53,9 @@ export function transformGenerationConfig(params: PortkeyGeminiParams) {
   }
 
   if (params?.thinking) {
-    const { budget_tokens, type, reasoning_effort } = params.thinking;
+    const { budget_tokens, type } = params.thinking;
     const thinkingConfig: Record<string, any> = {};
-    thinkingConfig['include_thoughts'] =
-      (type === 'enabled' || budget_tokens || reasoning_effort) ? true : false;
+    thinkingConfig['include_thoughts'] = true;
     thinkingConfig['thinking_budget'] = budget_tokens;
     generationConfig['thinking_config'] = thinkingConfig;
   }
@@ -68,6 +67,7 @@ export function transformGenerationConfig(params: PortkeyGeminiParams) {
   if (params.reasoning_effort && params.reasoning_effort !== 'none') {
     generationConfig['thinkingConfig'] = {
       thinkingLevel: params.reasoning_effort,
+      includeThoughts: true
     };
   }
   if (params.image_config) {
