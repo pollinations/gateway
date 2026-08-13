@@ -44,12 +44,15 @@ function transformedValue(
 }
 
 describe('Azure Chat Completions through Responses', () => {
-  it('only bridges opted-in function-tool requests with reasoning enabled', () => {
+  it('bridges opted-in function-tool requests unless reasoning is explicitly disabled', () => {
     expect(
       shouldUseAzureResponsesForChat(
         { tools: [functionTool], reasoning_effort: 'medium' },
         providerOptions
       )
+    ).toBe(true);
+    expect(
+      shouldUseAzureResponsesForChat({ tools: [functionTool] }, providerOptions)
     ).toBe(true);
     expect(
       shouldUseAzureResponsesForChat(
@@ -96,6 +99,36 @@ describe('Azure Chat Completions through Responses', () => {
         providerOptions
       )
     ).toThrow('only supports function tools');
+    expect(() =>
+      shouldUseAzureResponsesForChat(
+        {
+          tools: [functionTool],
+          reasoning_effort: 'medium',
+          best_of: 2,
+        },
+        providerOptions
+      )
+    ).toThrow('does not support: best_of');
+    expect(() =>
+      shouldUseAzureResponsesForChat(
+        {
+          tools: [functionTool],
+          reasoning_effort: 'medium',
+          logprobs: true as any,
+          top_logprobs: 21 as any,
+        },
+        providerOptions
+      )
+    ).toThrow('does not support: top_logprobs, logprobs');
+    expect(() =>
+      shouldUseAzureResponsesForChat(
+        {
+          functions: [functionTool.function],
+          reasoning_effort: 'medium',
+        } as any,
+        providerOptions
+      )
+    ).toThrow('does not support: functions');
   });
 
   it('maps messages, tool history, multimodal input, and direct parameters', () => {
@@ -109,6 +142,13 @@ describe('Azure Chat Completions through Responses', () => {
             {
               type: 'image_url',
               image_url: { url: 'data:image/png;base64,x' },
+            },
+            {
+              type: 'file',
+              file: {
+                file_data: 'data:application/pdf;base64,eA==',
+                file_name: 'input.pdf',
+              },
             },
           ],
         },
@@ -143,6 +183,7 @@ describe('Azure Chat Completions through Responses', () => {
         },
       },
       stream: true,
+      modalities: ['text'],
     } as Params;
 
     expect(
@@ -156,10 +197,16 @@ describe('Azure Chat Completions through Responses', () => {
       )
     ).toEqual([
       {
+        type: 'message',
         role: 'user',
         content: [
           { type: 'input_text', text: 'Read this image.' },
           { type: 'input_image', image_url: 'data:image/png;base64,x' },
+          {
+            type: 'input_file',
+            file_data: 'data:application/pdf;base64,eA==',
+            filename: 'input.pdf',
+          },
         ],
       },
       {
@@ -211,6 +258,7 @@ describe('Azure Chat Completions through Responses', () => {
         params
       )
     ).toBe('medium');
+    expect(AzureOpenAIResponsesChatCompleteConfig.modalities).toBeUndefined();
   });
 
   it('uses Azure v1 Responses independently of the Chat API version', () => {
@@ -297,9 +345,68 @@ describe('Azure Chat Completions through Responses', () => {
     });
   });
 
+  it('maps Chat-visible text, errors, and terminal states', () => {
+    const transformed = AzureOpenAIResponsesChatCompleteResponseTransform(
+      {
+        id: 'resp_text',
+        created_at: 1234,
+        status: 'completed',
+        model: 'gpt-5.6-luna',
+        output: [
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: 'Paris weather',
+              },
+            ],
+          },
+        ],
+      },
+      200
+    ) as any;
+
+    expect(transformed.choices[0]).toMatchObject({
+      message: {
+        content: 'Paris weather',
+      },
+      logprobs: null,
+      finish_reason: 'stop',
+    });
+
+    expect(
+      AzureOpenAIResponsesChatCompleteResponseTransform(
+        {
+          id: 'resp_filtered',
+          created_at: 1234,
+          status: 'incomplete',
+          incomplete_details: { reason: 'content_filter' },
+          model: 'gpt-5.6-luna',
+          output: [],
+        },
+        200
+      )
+    ).toMatchObject({ choices: [{ finish_reason: 'content_filter' }] });
+
+    expect(
+      AzureOpenAIResponsesChatCompleteResponseTransform(
+        {
+          status: 'failed',
+          error: { message: 'upstream failed', code: 'server_error' },
+        },
+        200
+      )
+    ).toMatchObject({
+      error: { message: 'azure-openai error: upstream failed' },
+    });
+  });
+
   it('maps Responses SSE tool calls, argument deltas, and usage', () => {
     const state = {};
-    const request = { stream_options: { include_usage: true } } as any;
+    const request = {
+      stream_options: { include_usage: true },
+    } as any;
     const chunks = [
       [
         'response.created',
@@ -319,6 +426,13 @@ describe('Azure Chat Completions through Responses', () => {
       [
         'response.function_call_arguments.delta',
         { item_id: 'fc_1', delta: '{"city":"Paris"}' },
+      ],
+      [
+        'response.output_text.delta',
+        {
+          item_id: 'msg_1',
+          delta: 'Checking',
+        },
       ],
       [
         'response.completed',
@@ -353,6 +467,7 @@ describe('Azure Chat Completions through Responses', () => {
     expect(chunks).toContain('"arguments":"{\\"city\\":\\"Paris\\"}"');
     expect(chunks).toContain('"finish_reason":"tool_calls"');
     expect(chunks).toContain('"reasoning_tokens":12');
+    expect(chunks).toContain('"content":"Checking"');
     expect(chunks).toContain('data: [DONE]');
   });
 });

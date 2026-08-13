@@ -21,6 +21,40 @@ type StreamState = {
 const isFunctionTool = (tool: Tool) =>
   tool?.type === 'function' && Boolean(tool.function?.name);
 
+const allowedChatParameters = new Set([
+  'model',
+  'messages',
+  'max_tokens',
+  'max_completion_tokens',
+  'temperature',
+  'top_p',
+  'n',
+  'stream',
+  'user',
+  'tools',
+  'tool_choice',
+  'response_format',
+  'logprobs',
+  'top_logprobs',
+  'stream_options',
+  'service_tier',
+  'parallel_tool_calls',
+  'store',
+  'metadata',
+  'modalities',
+  'reasoning_effort',
+  'prompt_cache_key',
+  'safety_identifier',
+  'verbosity',
+]);
+
+export function hasFunctionTools(params: Params): boolean {
+  const request = params as Record<string, any>;
+  return Boolean(
+    params.tools?.some(isFunctionTool) || request.functions?.length
+  );
+}
+
 function unsupportedChatParameters(params: Params): string[] {
   const request = params as Record<string, any>;
   const unsupported = [
@@ -37,14 +71,24 @@ function unsupportedChatParameters(params: Params): string[] {
     'web_search_options',
   ].filter((key) => request[key] !== undefined);
 
-  // `false` is Chat Completions' default and is equivalent to omitting it.
+  if (params.n !== undefined && params.n !== 1) unsupported.push('n');
   if (request.logprobs !== undefined && request.logprobs !== false) {
     unsupported.push('logprobs');
   }
-  if (params.n !== undefined && params.n !== 1) unsupported.push('n');
   if (params.modalities?.some((modality) => modality !== 'text')) {
     unsupported.push('modalities');
   }
+
+  for (const key of Object.keys(request)) {
+    if (
+      request[key] !== undefined &&
+      !allowedChatParameters.has(key) &&
+      !unsupported.includes(key)
+    ) {
+      unsupported.push(key);
+    }
+  }
+
   return unsupported;
 }
 
@@ -55,30 +99,98 @@ function assertCompatibleChatRequest(params: Params) {
       400
     );
   }
+  if (
+    typeof params.tool_choice === 'object' &&
+    (params.tool_choice.type !== 'function' ||
+      !params.tool_choice.function?.name)
+  ) {
+    throw new GatewayError(
+      'Azure Chat-to-Responses compatibility mode only supports function tool_choice objects',
+      400
+    );
+  }
+  const request = params as Record<string, any>;
+  if (
+    request.reasoning_effort !== undefined &&
+    typeof request.reasoning_effort !== 'string'
+  ) {
+    throw new GatewayError(
+      'Azure Chat-to-Responses compatibility mode requires reasoning_effort to be a string',
+      400
+    );
+  }
+  const streamOptions = request.stream_options;
+  if (
+    streamOptions &&
+    Object.keys(streamOptions).some((key) => key !== 'include_usage')
+  ) {
+    throw new GatewayError(
+      'Azure Chat-to-Responses compatibility mode only supports stream_options.include_usage',
+      400
+    );
+  }
 
   for (const message of params.messages || []) {
+    const refusal = (message as Record<string, any>).refusal;
     if (
-      message.role === 'function' ||
       message.name ||
+      message.role === 'function' ||
       message.function_call ||
       message.reasoning_details ||
+      message.content_blocks ||
+      (message as Record<string, any>).audio ||
+      (refusal !== undefined &&
+        (message.role !== 'assistant' || typeof refusal !== 'string')) ||
+      (['tool', 'function'].includes(message.role) &&
+        message.content === undefined) ||
       (message.role === 'tool' && !message.tool_call_id)
     ) {
       throw new GatewayError(
-        'Azure Chat-to-Responses compatibility mode cannot preserve named messages, legacy function messages, or provider-specific reasoning details',
+        'Azure Chat-to-Responses compatibility mode cannot preserve named messages, deprecated function messages, audio history, or provider-specific content',
         400
       );
     }
+
     if (
-      Array.isArray(message.content) &&
-      message.content.some(
-        (part) =>
-          !['text', 'image_url'].includes(part.type) ||
-          (part.type === 'image_url' && !part.image_url?.url)
+      Array.isArray(message.tool_calls) &&
+      message.tool_calls.some(
+        (call: any) =>
+          call?.type !== 'function' ||
+          !call.id ||
+          !call.function?.name ||
+          typeof call.function?.arguments !== 'string'
       )
     ) {
       throw new GatewayError(
-        'Azure Chat-to-Responses compatibility mode only supports text and image_url message content',
+        'Azure Chat-to-Responses compatibility mode only supports valid function tool call history',
+        400
+      );
+    }
+
+    if (
+      Array.isArray(message.content) &&
+      message.content.some((part) => {
+        if (part.type === 'text') return typeof part.text === 'string';
+        if (part.type === 'refusal') {
+          return (
+            message.role === 'assistant' &&
+            typeof (part as Record<string, any>).refusal === 'string'
+          );
+        }
+        if (part.type === 'image_url') {
+          return message.role === 'user' && Boolean(part.image_url?.url);
+        }
+        if (part.type === 'file') {
+          const file = part.file as Record<string, any> | undefined;
+          return Boolean(
+            message.role === 'user' && file && (file.file_id || file.file_data)
+          );
+        }
+        return false;
+      })
+    ) {
+      throw new GatewayError(
+        'Azure Chat-to-Responses compatibility mode only supports Chat text, refusal, image_url, and file message content',
         400
       );
     }
@@ -106,8 +218,7 @@ export function shouldUseAzureResponsesForChat(
 ): boolean {
   const shouldUse = Boolean(
     isAzureResponsesChatCompatibilityEnabled(providerOptions) &&
-      params.tools?.some(isFunctionTool) &&
-      typeof params.reasoning_effort === 'string' &&
+      hasFunctionTools(params) &&
       params.reasoning_effort !== 'none'
   );
   if (shouldUse) assertCompatibleChatRequest(params);
@@ -119,12 +230,37 @@ export function getAzureResponsesChatEndpoint(): string {
 }
 
 function mapMessageContent(content: Message['content'], role: Message['role']) {
-  if (!Array.isArray(content)) return content;
+  if (typeof content === 'string') {
+    return [
+      {
+        type: role === 'assistant' ? 'output_text' : 'input_text',
+        text: content,
+      },
+    ];
+  }
+  if (!Array.isArray(content)) return [];
   return content.map((part) => {
     if (part.type === 'text') {
       return {
         type: role === 'assistant' ? 'output_text' : 'input_text',
         text: part.text || '',
+      };
+    }
+    if (part.type === 'refusal') {
+      return {
+        type: 'refusal',
+        refusal: (part as Record<string, any>).refusal,
+      };
+    }
+    if (part.type === 'file') {
+      const file = part.file as Record<string, any>;
+      return {
+        type: 'input_file',
+        ...(file.file_id && { file_id: file.file_id }),
+        ...(file.file_data && { file_data: file.file_data }),
+        ...((file.filename || file.file_name) && {
+          filename: file.filename || file.file_name,
+        }),
       };
     }
     return {
@@ -135,47 +271,59 @@ function mapMessageContent(content: Message['content'], role: Message['role']) {
   });
 }
 
-function toolOutput(content: Message['content']): string {
-  return typeof content === 'string' ? content : JSON.stringify(content ?? '');
+function toolOutput(
+  content: Message['content']
+): string | Record<string, any>[] {
+  return typeof content === 'string'
+    ? content
+    : (mapMessageContent(content, 'user') as any);
 }
 
 /** Convert Chat history, including completed tool rounds, to Responses input. */
 export function chatMessagesToResponsesInput(messages: Message[] = []) {
-  return messages.flatMap((message) => {
-    if (message.role === 'tool') {
-      return [
-        {
-          type: 'function_call_output',
-          call_id: message.tool_call_id,
-          output: toolOutput(message.content),
-        },
-      ];
-    }
+  const input: Record<string, any>[] = [];
 
+  for (const message of messages) {
+    if (message.role === 'tool') {
+      input.push({
+        type: 'function_call_output',
+        call_id: message.tool_call_id,
+        output: toolOutput(message.content),
+      });
+      continue;
+    }
     const calls =
       message.role === 'assistant' && Array.isArray(message.tool_calls)
         ? message.tool_calls
         : [];
-    const items: Record<string, any>[] = [];
-    if (message.content || calls.length === 0) {
-      items.push({
+    if (
+      (message.content !== undefined &&
+        message.content !== null &&
+        (message.content !== '' || calls.length === 0)) ||
+      (message as Record<string, any>).refusal
+    ) {
+      const content = mapMessageContent(message.content, message.role);
+      const refusal = (message as Record<string, any>).refusal;
+      if (refusal && Array.isArray(content)) {
+        content.push({ type: 'refusal', refusal });
+      }
+      input.push({
+        type: 'message',
         role: message.role,
-        content: mapMessageContent(message.content, message.role) ?? '',
-        ...(message.name && { name: message.name }),
+        content,
       });
     }
     for (const call of calls) {
-      if (call?.type === 'function' && call.function?.name) {
-        items.push({
-          type: 'function_call',
-          call_id: call.id,
-          name: call.function.name,
-          arguments: call.function.arguments || '',
-        });
-      }
+      input.push({
+        type: 'function_call',
+        call_id: call.id,
+        name: call.function.name,
+        arguments: call.function.arguments,
+      });
     }
-    return items;
-  });
+  }
+
+  return input;
 }
 
 export function chatToolsToResponsesTools(tools: Tool[] = []) {
@@ -248,7 +396,6 @@ export const AzureOpenAIResponsesChatCompleteConfig: ProviderConfig = {
   parallel_tool_calls: { param: 'parallel_tool_calls' },
   store: { param: 'store' },
   metadata: { param: 'metadata' },
-  modalities: { param: 'modalities' },
   user: { param: 'user' },
   prompt_cache_key: { param: 'prompt_cache_key' },
   safety_identifier: { param: 'safety_identifier' },
@@ -275,28 +422,54 @@ function usage(responsesUsage: any) {
 
 function finishReason(response: any, hasToolCalls: boolean) {
   if (hasToolCalls) return 'tool_calls';
-  return response.status === 'incomplete' &&
-    response.incomplete_details?.reason === 'max_output_tokens'
-    ? 'length'
-    : 'stop';
+  if (response.status !== 'incomplete') return 'stop';
+  return response.incomplete_details?.reason === 'content_filter'
+    ? 'content_filter'
+    : 'length';
+}
+
+function chatError(error: any, fallbackMessage: string): ErrorResponse {
+  return OpenAIErrorResponseTransform(
+    {
+      error: {
+        message: error?.message || fallbackMessage,
+        type: error?.type || 'server_error',
+        param: error?.param || null,
+        code: error?.code || null,
+      },
+      provider: AZURE_OPEN_AI,
+    },
+    AZURE_OPEN_AI
+  );
 }
 
 export const AzureOpenAIResponsesChatCompleteResponseTransform = (
   response: any,
   responseStatus: number
 ): ChatCompletionResponse | ErrorResponse => {
-  if (responseStatus !== 200 && response.error) {
-    return OpenAIErrorResponseTransform(
-      response as ErrorResponse,
-      AZURE_OPEN_AI
+  if (
+    responseStatus !== 200 ||
+    response.error ||
+    response.status === 'failed'
+  ) {
+    return chatError(
+      response.error,
+      `Responses request failed with status ${response.status || responseStatus}`
     );
   }
 
-  const calls = response.output.filter(
+  if (!['completed', 'incomplete'].includes(response.status)) {
+    return chatError(
+      undefined,
+      `Responses request ended with unsupported status ${response.status}`
+    );
+  }
+
+  const calls = (response.output || []).filter(
     (item: any) => item.type === 'function_call'
   );
-  const parts = response.output
-    .filter((item: any) => item.type === 'message')
+  const parts = (response.output || [])
+    .filter((item: any) => ['message', 'output_message'].includes(item.type))
     .flatMap((item: any) => item.content || []);
   const content = parts
     .filter((part: any) => part.type === 'output_text')
@@ -383,6 +556,17 @@ function toolIndex(state: StreamState, itemId: string) {
   return state.toolIndexes[itemId];
 }
 
+function streamError(error: any, fallbackMessage: string) {
+  return `data: ${JSON.stringify({
+    error: {
+      message: error?.message || fallbackMessage,
+      type: error?.type || 'server_error',
+      param: error?.param || null,
+      code: error?.code || null,
+    },
+  })}\n\ndata: [DONE]\n\n`;
+}
+
 export const AzureOpenAIResponsesChatCompleteStreamChunkTransform = (
   responseChunk: string,
   _fallbackId: string,
@@ -423,7 +607,10 @@ export const AzureOpenAIResponsesChatCompleteStreamChunkTransform = (
               index: toolIndex(state, parsed.item.id || parsed.item.call_id),
               id: parsed.item.call_id || parsed.item.id,
               type: 'function',
-              function: { name: parsed.item.name, arguments: '' },
+              function: {
+                name: parsed.item.name,
+                arguments: parsed.item.arguments || '',
+              },
             },
           ],
         },
@@ -484,10 +671,14 @@ export const AzureOpenAIResponsesChatCompleteStreamChunkTransform = (
     state.done = true;
     return `${finalChunk}${usageChunk}data: [DONE]\n\n`;
   }
-  if (event === 'response.failed' || event === 'error') {
+  if (
+    event === 'response.failed' ||
+    event === 'response.cancelled' ||
+    event === 'error'
+  ) {
     state.done = true;
     const error = parsed.response?.error || parsed.error || parsed;
-    return `data: ${JSON.stringify({ error })}\n\ndata: [DONE]\n\n`;
+    return streamError(error, `Responses stream failed with event ${event}`);
   }
   return undefined;
 };
