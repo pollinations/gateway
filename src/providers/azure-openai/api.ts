@@ -6,6 +6,10 @@ import {
   getAzureWorkloadIdentityToken,
 } from './utils';
 import { getRuntimeKey } from 'hono/adapter';
+import {
+  getAzureResponsesChatEndpoint,
+  shouldUseAzureResponsesForChat,
+} from './chatCompletionsResponses';
 
 const runtime = getRuntimeKey();
 
@@ -100,7 +104,12 @@ const AzureOpenAIAPIConfig: ProviderAPIConfig = {
     }
     return headersObj;
   },
-  getEndpoint: ({ providerOptions, fn, gatewayRequestURL }) => {
+  getEndpoint: ({
+    providerOptions,
+    fn,
+    gatewayRequestBodyJSON,
+    gatewayRequestURL,
+  }) => {
     const { apiVersion, urlToFetch, deploymentId } = providerOptions;
     let mappedFn = fn;
 
@@ -138,6 +147,13 @@ const AzureOpenAIAPIConfig: ProviderAPIConfig = {
     if (isAzureV1API) {
       prefix = '/v1';
       searchParams.delete('api-version');
+    }
+
+    if (
+      mappedFn === 'chatComplete' &&
+      shouldUseAzureResponsesForChat(gatewayRequestBodyJSON, providerOptions)
+    ) {
+      return getAzureResponsesChatEndpoint();
     }
 
     switch (mappedFn) {
