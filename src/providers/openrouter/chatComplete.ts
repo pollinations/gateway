@@ -10,7 +10,6 @@ import {
   generateErrorResponse,
   generateInvalidProviderResponseError,
 } from '../utils';
-import { transformReasoningParams, transformUsageOptions } from './utils';
 
 export const OpenrouterChatCompleteConfig: ProviderConfig = {
   model: {
@@ -34,7 +33,7 @@ export const OpenrouterChatCompleteConfig: ProviderConfig = {
     min: 0,
   },
   max_completion_tokens: {
-    param: 'max_tokens',
+    param: 'max_completion_tokens',
     default: 100,
     min: 0,
   },
@@ -47,23 +46,77 @@ export const OpenrouterChatCompleteConfig: ProviderConfig = {
   modalities: {
     param: 'modalities',
   },
+  cache_control: {
+    param: 'cache_control',
+  },
+  debug: {
+    param: 'debug',
+  },
+  frequency_penalty: {
+    param: 'frequency_penalty',
+    min: -2,
+    max: 2,
+  },
+  image_config: {
+    param: 'image_config',
+  },
+  logit_bias: {
+    param: 'logit_bias',
+  },
+  logprobs: {
+    param: 'logprobs',
+  },
+  metadata: {
+    param: 'metadata',
+  },
+  min_p: {
+    param: 'min_p',
+    min: 0,
+    max: 1,
+  },
   reasoning: {
     param: 'reasoning',
-    transform: (params: Params) => {
-      return transformReasoningParams(params);
-    },
   },
   reasoning_effort: {
-    param: 'reasoning',
-    transform: (params: Params) => {
-      return transformReasoningParams(params);
-    },
+    param: 'reasoning_effort',
   },
   top_p: {
     param: 'top_p',
     default: 1,
     min: 0,
     max: 1,
+  },
+  parallel_tool_calls: {
+    param: 'parallel_tool_calls',
+  },
+  plugins: {
+    param: 'plugins',
+  },
+  presence_penalty: {
+    param: 'presence_penalty',
+    min: -2,
+    max: 2,
+  },
+  repetition_penalty: {
+    param: 'repetition_penalty',
+  },
+  route: {
+    param: 'route',
+  },
+  seed: {
+    param: 'seed',
+  },
+  service_tier: {
+    param: 'service_tier',
+  },
+  session_id: {
+    param: 'session_id',
+  },
+  stop: {
+    param: 'stop',
+  },
+  stop_server_tools_when: {
+    param: 'stop_server_tools_when',
   },
   tools: {
     param: 'tools',
@@ -82,22 +135,31 @@ export const OpenrouterChatCompleteConfig: ProviderConfig = {
   },
   usage: {
     param: 'usage',
-    transform: (params: Params) => {
-      return transformUsageOptions(params);
-    },
   },
   stream: {
     param: 'stream',
     default: false,
   },
   stream_options: {
-    param: 'usage',
-    transform: (params: Params) => {
-      return transformUsageOptions(params);
-    },
+    param: 'stream_options',
   },
   response_format: {
     param: 'response_format',
+  },
+  top_a: {
+    param: 'top_a',
+  },
+  top_k: {
+    param: 'top_k',
+  },
+  top_logprobs: {
+    param: 'top_logprobs',
+  },
+  trace: {
+    param: 'trace',
+  },
+  user: {
+    param: 'user',
   },
 };
 
