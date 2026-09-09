@@ -38,7 +38,8 @@ export const getStreamModeSplitPattern = (
   }
 
   if (proxyProvider === PERPLEXITY_AI) {
-    splitPattern = '\r\n\r\n';
+    // Accept LF and CRLF so separate SSE events never reach the JSON parser together.
+    splitPattern = /\r?\n\r?\n/;
   }
 
   if (proxyProvider === DEEPINFRA) {
@@ -55,7 +56,13 @@ export const getStreamModeSplitPattern = (
 
   return splitPattern;
 };
-export type SplitPatternType = '\n\n' | '\r\n\r\n' | '\n' | '\r\n' | ' ';
+export type SplitPatternType =
+  | '\n\n'
+  | '\r\n\r\n'
+  | '\n'
+  | '\r\n'
+  | ' '
+  | RegExp;
 
 export const getStreamingMode = (
   reqBody: Params,

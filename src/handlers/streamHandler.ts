@@ -198,7 +198,8 @@ export async function* readStream(
               yield transformedChunk;
             }
           } else {
-            yield part + splitPattern;
+            yield part +
+              (typeof splitPattern === 'string' ? splitPattern : '\n\n');
           }
         }
       }
