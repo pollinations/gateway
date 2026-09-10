@@ -71,6 +71,9 @@ export interface BedrockConverseAnthropicChatCompletionsParams
     type: string;
     budget_tokens: number;
   };
+  output_config?: {
+    effort?: string;
+  };
   anthropic_beta?: string | string[];
 }
 
@@ -717,6 +720,26 @@ export const BedrockChatCompleteStreamChunkTransform: (
 
 export const BedrockConverseAnthropicChatCompleteConfig: ProviderConfig = {
   ...BedrockConverseChatCompleteConfig,
+  response_format: {
+    param: 'outputConfig',
+    transform: (params: BedrockConverseAnthropicChatCompletionsParams) => {
+      if (params.response_format?.type !== 'json_schema') return;
+      const { name, description, schema } =
+        params.response_format.json_schema || {};
+      return {
+        textFormat: {
+          type: 'json_schema',
+          structure: {
+            jsonSchema: {
+              name,
+              description,
+              schema: JSON.stringify(schema),
+            },
+          },
+        },
+      };
+    },
+  },
   additionalModelRequestFields: {
     param: 'additionalModelRequestFields',
     transform: (
@@ -758,6 +781,14 @@ export const BedrockConverseAnthropicChatCompleteConfig: ProviderConfig = {
       transformAnthropicAdditionalModelRequestFields(params, providerOptions),
   },
   thinking: {
+    param: 'additionalModelRequestFields',
+    transform: (
+      params: BedrockConverseAnthropicChatCompletionsParams,
+      providerOptions?: Options
+    ) =>
+      transformAnthropicAdditionalModelRequestFields(params, providerOptions),
+  },
+  output_config: {
     param: 'additionalModelRequestFields',
     transform: (
       params: BedrockConverseAnthropicChatCompletionsParams,

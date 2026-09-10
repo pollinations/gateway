@@ -42,6 +42,9 @@ export const OpenAIChatCompleteConfig: ProviderConfig = {
     min: 0,
     max: 1,
   },
+  top_k: {
+    param: 'top_k',
+  },
   n: {
     param: 'n',
     default: 1,

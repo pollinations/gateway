@@ -21,5 +21,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Test request parameter mappings
+        run: npm run test:parameters
+
       - name: Check formatting
         run: npm run format:check

@@ -79,6 +79,9 @@ export const AzureOpenAIChatCompleteConfig: ProviderConfig = {
   tool_choice: {
     param: 'tool_choice',
   },
+  parallel_tool_calls: {
+    param: 'parallel_tool_calls',
+  },
   response_format: {
     param: 'response_format',
   },
