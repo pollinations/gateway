@@ -298,6 +298,21 @@ export function handleImageResponse(response: Response) {
   return new Response(response.body, response);
 }
 
+function writeStreamError(writer: WritableStreamDefaultWriter, error: unknown) {
+  const event = {
+    error: {
+      message: error instanceof Error ? error.message : String(error),
+      type: 'upstream_error',
+      code: 'upstream_stream_error',
+    },
+  };
+  return writer
+    .write(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`))
+    .catch(() => {
+      // A disconnected client cannot receive the error event.
+    });
+}
+
 export function handleStreamingMode(
   response: Response,
   proxyProvider: string,
@@ -342,6 +357,7 @@ export function handleStreamingMode(
         }
       } catch (error) {
         console.error('Error during stream processing:', proxyProvider, error);
+        await writeStreamError(writer, error);
       } finally {
         try {
           await writer.close();
@@ -376,6 +392,7 @@ export function handleStreamingMode(
         }
       } catch (error) {
         console.error('Error during stream processing:', proxyProvider, error);
+        await writeStreamError(writer, error);
       } finally {
         try {
           await writer.close();
