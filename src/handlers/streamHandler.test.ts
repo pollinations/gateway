@@ -1,7 +1,7 @@
-import { PERPLEXITY_AI } from '../globals';
+import { BEDROCK, OPEN_AI, PERPLEXITY_AI } from '../globals';
 import { PerplexityAIChatCompleteStreamChunkTransform } from '../providers/perplexity-ai/chatComplete';
 import { getStreamModeSplitPattern } from '../utils';
-import { readStream } from './streamHandler';
+import { handleStreamingMode, readStream } from './streamHandler';
 
 describe('Perplexity SSE framing', () => {
   const usage = {
@@ -83,5 +83,82 @@ describe('Perplexity SSE framing', () => {
     ))
       output += chunk;
     expect(output).toBe(input.replaceAll('\r\n', '\n'));
+  });
+});
+
+describe('upstream stream failures', () => {
+  it('leaves a healthy stream unchanged', async () => {
+    const body =
+      'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}\n\n' +
+      'data: [DONE]\n\n';
+    const response = handleStreamingMode(
+      new Response(body),
+      OPEN_AI,
+      undefined,
+      '/chat/completions',
+      false,
+      {},
+      'chatComplete',
+      { beforeRequestHooksResult: [], afterRequestHooksResult: [] }
+    );
+    expect(await response.text()).toBe(body);
+  });
+
+  it.each([OPEN_AI, BEDROCK])(
+    'preserves the read error for %s',
+    async (provider) => {
+      const response = handleStreamingMode(
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(new Error('upstream connection reset'));
+            },
+          })
+        ),
+        provider,
+        undefined,
+        '/chat/completions',
+        false,
+        {},
+        'chatComplete',
+        { beforeRequestHooksResult: [], afterRequestHooksResult: [] }
+      );
+      const output = await response.text();
+      expect(JSON.parse(output.trim().slice(6))).toEqual({
+        error: {
+          message: 'upstream connection reset',
+          type: 'upstream_error',
+          code: 'upstream_stream_error',
+        },
+      });
+      expect(output).not.toContain('[DONE]');
+    }
+  );
+
+  it('preserves already delivered content and emits one complete error event', async () => {
+    const delta = 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n';
+    let reads = 0;
+    const response = handleStreamingMode(
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (reads++ === 0)
+              controller.enqueue(new TextEncoder().encode(delta));
+            else controller.error(new Error('socket closed'));
+          },
+        })
+      ),
+      OPEN_AI,
+      undefined,
+      '/chat/completions',
+      false,
+      {},
+      'chatComplete',
+      { beforeRequestHooksResult: [], afterRequestHooksResult: [] }
+    );
+    const output = await response.text();
+    expect(output.startsWith(delta)).toBe(true);
+    expect(output.match(/upstream_stream_error/g)).toHaveLength(1);
+    expect(reads).toBe(2);
   });
 });
