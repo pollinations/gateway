@@ -40,8 +40,14 @@ import {
   OpenAIResponseTransform,
 } from '../open-ai-base';
 import { AZURE_OPEN_AI } from '../../globals';
+import {
+  AzureOpenAIResponsesChatCompleteConfig,
+  AzureOpenAIResponsesChatCompleteResponseTransform,
+  AzureOpenAIResponsesChatCompleteStreamChunkTransform,
+  shouldUseAzureResponsesForChat,
+} from './chatCompletionsResponses';
 
-const AzureOpenAIConfig: ProviderConfigs = {
+const AzureOpenAIBaseConfig: ProviderConfigs = {
   complete: AzureOpenAICompleteConfig,
   embed: AzureOpenAIEmbedConfig,
   api: AzureOpenAIAPIConfig,
@@ -100,6 +106,25 @@ const AzureOpenAIConfig: ProviderConfigs = {
   requestTransforms: {
     createFinetune: AzureTransformFinetuneBody,
     uploadFile: OpenAIFileUploadRequestTransform,
+  },
+};
+
+const AzureOpenAIConfig: ProviderConfigs = {
+  ...AzureOpenAIBaseConfig,
+  getConfig: ({ params, providerOptions }) => {
+    if (!shouldUseAzureResponsesForChat(params, providerOptions)) {
+      return AzureOpenAIBaseConfig;
+    }
+    return {
+      ...AzureOpenAIBaseConfig,
+      chatComplete: AzureOpenAIResponsesChatCompleteConfig,
+      responseTransforms: {
+        ...AzureOpenAIBaseConfig.responseTransforms,
+        chatComplete: AzureOpenAIResponsesChatCompleteResponseTransform,
+        'stream-chatComplete':
+          AzureOpenAIResponsesChatCompleteStreamChunkTransform,
+      },
+    };
   },
 };
 

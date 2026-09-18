@@ -851,6 +851,7 @@ export function constructConfigFromRequestHeaders(
       requestHeaders[`x-${POWERED_BY}-azure-entra-client-secret`],
     azureEntraTenantId: requestHeaders[`x-${POWERED_BY}-azure-entra-tenant-id`],
     azureModelName: requestHeaders[`x-${POWERED_BY}-azure-model-name`],
+    chatCompletionsApi: requestHeaders[`x-${POWERED_BY}-chat-completions-api`],
     openaiBeta:
       requestHeaders[`x-${POWERED_BY}-openai-beta`] ||
       requestHeaders[`openai-beta`],
