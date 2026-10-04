@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { AZURE_OPEN_AI, BEDROCK, OPEN_AI } from '../../../../src/globals';
+import {
+  AZURE_OPEN_AI,
+  BEDROCK,
+  GOOGLE_VERTEX_AI,
+  OPEN_AI,
+} from '../../../../src/globals';
 import { BedrockConverseAnthropicChatCompletionsParams } from '../../../../src/providers/bedrock/chatComplete';
 import { Params } from '../../../../src/types/requestBody';
 import { transformToProviderRequest } from '../../../../src/services/transformToProviderRequest';
@@ -151,5 +156,32 @@ describe('Claude Converse parameters', () => {
     const request = chatRequest(BEDROCK, params);
     assert.equal('outputConfig' in request, false);
     assert.equal('additionalModelRequestFields' in request, false);
+  });
+});
+
+describe('Vertex Gemini system messages', () => {
+  it('sends every system message and text part as systemInstruction', () => {
+    const request = chatRequest(GOOGLE_VERTEX_AI, {
+      model: 'gemini-3-flash-preview',
+      messages: [
+        { role: 'system', content: 'Answer in German.' },
+        {
+          role: 'system',
+          content: [
+            { type: 'text', text: 'Be brief.' },
+            { type: 'text', text: 'End with BANANE.' },
+          ],
+        },
+        { role: 'user', content: 'Name a colour.' },
+      ],
+    });
+    assert.deepEqual(request.systemInstruction, {
+      parts: [
+        { text: 'Answer in German.' },
+        { text: 'Be brief.' },
+        { text: 'End with BANANE.' },
+      ],
+      role: 'system',
+    });
   });
 });

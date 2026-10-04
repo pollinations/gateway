@@ -261,39 +261,20 @@ export const VertexGoogleChatCompleteConfig: ProviderConfig = {
                     )
                 )
                     return;
-                const firstMessage = params.messages?.[0] || null;
-                if (!firstMessage) return;
-
-                if (
-                    SYSTEM_MESSAGE_ROLES.includes(firstMessage.role) &&
-                    typeof firstMessage.content === "string"
-                ) {
-                    return {
-                        parts: [
-                            {
-                                text: firstMessage.content,
-                            },
-                        ],
-                        role: "system",
-                    };
-                }
-
-                if (
-                    SYSTEM_MESSAGE_ROLES.includes(firstMessage.role) &&
-                    typeof firstMessage.content === "object" &&
-                    firstMessage.content?.[0]?.text
-                ) {
-                    return {
-                        parts: [
-                            {
-                                text: firstMessage.content?.[0].text,
-                            },
-                        ],
-                        role: "system",
-                    };
-                }
-
-                return;
+                // contents skips every system message, so all of them go here.
+                const parts = (params.messages ?? [])
+                    .filter((message) =>
+                        SYSTEM_MESSAGE_ROLES.includes(message.role),
+                    )
+                    .flatMap((message) =>
+                        typeof message.content === "string"
+                            ? [{ text: message.content }]
+                            : (message.content ?? [])
+                                  .filter((part) => part.text)
+                                  .map((part) => ({ text: part.text })),
+                    );
+                if (!parts.length) return;
+                return { parts, role: "system" };
             },
         },
     ],
