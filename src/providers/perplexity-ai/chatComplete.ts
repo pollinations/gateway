@@ -101,6 +101,13 @@ interface PerplexityAIChatChoice {
   finish_reason: string | null;
 }
 
+interface PerplexityAIUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  [key: string]: unknown;
+}
+
 export interface PerplexityAIChatCompleteResponse {
   id: string;
   model: string;
@@ -108,11 +115,7 @@ export interface PerplexityAIChatCompleteResponse {
   created: number;
   citations: string[];
   choices: PerplexityAIChatChoice[];
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
+  usage: PerplexityAIUsage;
 }
 
 export interface PerplexityAIErrorResponse {
@@ -129,12 +132,16 @@ export interface PerplexityAIChatCompletionStreamChunk {
   object: string;
   created: number;
   citations?: string[];
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
+  usage: PerplexityAIUsage;
   choices: PerplexityAIChatChoice[];
+}
+
+function toOpenAIUsage(usage: PerplexityAIUsage) {
+  return {
+    prompt_tokens: usage.prompt_tokens,
+    completion_tokens: usage.completion_tokens,
+    total_tokens: usage.total_tokens,
+  };
 }
 
 export const PerplexityAIChatCompleteResponseTransform: (
@@ -181,11 +188,9 @@ export const PerplexityAIChatCompleteResponseTransform: (
           finish_reason: '',
         },
       ],
-      usage: {
-        prompt_tokens: response.usage.prompt_tokens,
-        completion_tokens: response.usage.completion_tokens,
-        total_tokens: response.usage.total_tokens,
-      },
+      usage: strictOpenAiCompliance
+        ? toOpenAIUsage(response.usage)
+        : response.usage,
     };
   }
 
@@ -229,7 +234,11 @@ export const PerplexityAIChatCompleteStreamChunkTransform: (
         },
       ],
       ...(parsedChunk.usage &&
-        parsedChunk.choices[0]?.finish_reason && { usage: parsedChunk.usage }),
+        parsedChunk.choices[0]?.finish_reason && {
+          usage: strictOpenAiCompliance
+            ? toOpenAIUsage(parsedChunk.usage)
+            : parsedChunk.usage,
+        }),
     })}` + '\n\n';
 
   if (parsedChunk.choices[0]?.finish_reason)
