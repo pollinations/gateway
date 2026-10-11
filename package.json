@@ -27,6 +27,7 @@
     "dev:node": "tsx src/start-server.ts",
     "dev:workerd": "wrangler dev src/index.ts",
     "deploy": "wrangler deploy --minify src/index.ts",
+    "deploy:staging": "wrangler deploy --minify src/index.ts --env staging",
     "pretty": "prettier --write \"./**/*.{js,jsx,ts,tsx,json}\"",
     "build": "rollup -c",
     "build-plugins": "tsx plugins/build.ts",

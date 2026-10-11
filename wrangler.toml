@@ -8,10 +8,13 @@ ENVIRONMENT = 'dev'
 CUSTOM_HEADERS_TO_IGNORE = []
 
 #
-#Configuration for DEVELOPMENT environment
+# Staging on a separate worker and custom domain.
 #
 [env.staging]
-name = "rubeus-dev"
+name = "rubeus-staging"
+routes = [
+    { pattern = "portkey-staging.pollinations.ai", custom_domain = true }
+]
 
 [env.staging.vars]
 ENVIRONMENT = 'staging'
