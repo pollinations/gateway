@@ -17,16 +17,27 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Link Checker
-        uses: lycheeverse/lychee-action@v1.8.0
-        with:
-          args: --verbose --no-progress './**/*.md'
-          fail: true
+      - name: List Markdown files
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            # PRs check only the Markdown they add, change or rename.
+            gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+              --jq '.[] | select(.status != "removed" and (.filename | endswith(".md"))) | .filename'
+          else
+            git ls-files '*.md'
+          fi > md-files.txt
+
+      - name: Link Checker
+        uses: lycheeverse/lychee-action@v2.9.0
+        with:
+          args: --verbose --no-progress --root-dir ${{ github.workspace }} --files-from md-files.txt
+          failIfEmpty: false
 
       - name: Create Issue If Failed
-        if: failure()
+        if: failure() && github.event_name != 'pull_request'
         uses: actions/github-script@v6
         with:
           script: |
