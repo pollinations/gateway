@@ -66,53 +66,18 @@ export async function* readAWSStream(
   gatewayRequest: Params
 ) {
   let buffer = new Uint8Array();
-  let expectedLength = 0;
   const streamState = {};
   while (true) {
     const { done, value } = await reader.read();
-    if (done) {
-      if (buffer.length) {
-        expectedLength = readUInt32BE(buffer, 0);
-        while (buffer.length >= expectedLength && buffer.length !== 0) {
-          const data = buffer.subarray(0, expectedLength);
-          buffer = buffer.subarray(expectedLength);
-          expectedLength = readUInt32BE(buffer, 0);
-          const payload = getPayloadFromAWSChunk(data);
-          if (transformFunction) {
-            const transformedChunk = transformFunction(
-              payload,
-              fallbackChunkId,
-              streamState,
-              strictOpenAiCompliance,
-              gatewayRequest
-            );
-            if (Array.isArray(transformedChunk)) {
-              for (const item of transformedChunk) {
-                yield item;
-              }
-            } else {
-              yield transformedChunk;
-            }
-          } else {
-            yield data;
-          }
-        }
-      }
-      break;
-    }
-
+    if (done) break;
     buffer = concatenateUint8Arrays(buffer, value);
-    if (buffer.length < 4) continue;
 
-    if (expectedLength === 0) {
-      expectedLength = readUInt32BE(buffer, 0);
-    }
-
-    while (buffer.length >= 4 && buffer.length >= expectedLength) {
-      const data = buffer.subarray(0, expectedLength);
-      buffer = buffer.subarray(expectedLength);
-
-      expectedLength = buffer.length >= 4 ? readUInt32BE(buffer, 0) : 0;
+    // Each AWS EventStream frame starts with its 4-byte total length.
+    while (buffer.length >= 4) {
+      const frameLength = readUInt32BE(buffer, 0);
+      if (buffer.length < frameLength) break;
+      const data = buffer.subarray(0, frameLength);
+      buffer = buffer.subarray(frameLength);
       const payload = getPayloadFromAWSChunk(data);
 
       if (transformFunction) {
