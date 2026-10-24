@@ -15,19 +15,40 @@ jobs:
   linkChecker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
+
+      - name: Test link-check scope
+        run: node --test .github/scripts/markdown-link-args.test.cjs
+
+      - name: Select Markdown files
+        id: markdown
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const markdownLinkArgs = require('./.github/scripts/markdown-link-args.cjs');
+            const files = context.eventName === 'pull_request'
+              ? await github.paginate(github.rest.pulls.listFiles, {
+                  ...context.repo,
+                  pull_number: context.issue.number,
+                  per_page: 100,
+                })
+              : [];
+            const args = markdownLinkArgs(context.eventName, files);
+            core.setOutput('args', args);
+            if (!args) core.notice('No changed Markdown files; full documentation audit runs weekly and manually.');
 
       - name: Link Checker
+        if: steps.markdown.outputs.args != ''
         uses: lycheeverse/lychee-action@v1.8.0
         with:
-          args: --verbose --no-progress './**/*.md'
+          args: --verbose --no-progress ${{ steps.markdown.outputs.args }}
           fail: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Issue If Failed
-        if: failure()
-        uses: actions/github-script@v6
+        if: failure() && github.event_name != 'pull_request'
+        uses: actions/github-script@v9
         with:
           script: |
             const title = '🔗 Broken links found in documentation';
