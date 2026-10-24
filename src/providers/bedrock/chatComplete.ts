@@ -37,7 +37,6 @@ import {
   BedrockStreamState,
 } from './types';
 import {
-  getBedrockErrorChunk,
   transformAdditionalModelRequestFields,
   transformAI21AdditionalModelRequestFields,
   transformAnthropicAdditionalModelRequestFields,
@@ -457,7 +456,7 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
 };
 
 export const BedrockErrorResponseTransform: (
-  response: BedrockErrorResponse
+  response: Pick<BedrockErrorResponse, 'message'>
 ) => ErrorResponse | undefined = (response) => {
   if ('message' in response) {
     return generateErrorResponse(
@@ -601,7 +600,10 @@ export const BedrockChatCompleteStreamChunkTransform: (
 ) => {
   const parsedChunk: BedrockChatCompleteStreamChunk = JSON.parse(responseChunk);
   if (parsedChunk.message) {
-    return getBedrockErrorChunk(fallbackId, gatewayRequest.model || '');
+    return [
+      `data: ${JSON.stringify(BedrockErrorResponseTransform({ message: parsedChunk.message }))}\n\n`,
+      `data: [DONE]\n\n`,
+    ];
   }
   if (parsedChunk.stopReason) {
     streamState.stopReason = parsedChunk.stopReason;

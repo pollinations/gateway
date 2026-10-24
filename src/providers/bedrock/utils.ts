@@ -12,7 +12,6 @@ import { Options, Tool } from '../../types/requestBody';
 import { GatewayError } from '../../errors/GatewayError';
 import { BedrockFinetuneRecord, BedrockInferenceProfile } from './types';
 import { FinetuneRequest } from '../types';
-import { BEDROCK } from '../../globals';
 import { Environment } from '../../utils/env';
 
 export const getAwsEndpointDomain = (c: Context) =>
@@ -523,28 +522,6 @@ export const getFoundationModelFromInferenceProfile = async (
   } catch (error) {
     return null;
   }
-};
-
-export const getBedrockErrorChunk = (id: string, model: string) => {
-  return [
-    `data: ${JSON.stringify({
-      id,
-      object: 'chat.completion.chunk',
-      created: Math.floor(Date.now() / 1000),
-      model: model,
-      provider: BEDROCK,
-      choices: [
-        {
-          index: 0,
-          delta: {
-            role: 'assistant',
-            finish_reason: 'stop',
-          },
-        },
-      ],
-    })}\n\n`,
-    `data: [DONE]\n\n`,
-  ];
 };
 
 export const getBedrockModelWithoutRegion = (model: string) => {

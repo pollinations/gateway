@@ -35,6 +35,7 @@
     "format": "prettier --write \"./**/*.{js,jsx,ts,tsx,json}\"",
     "format:check": "prettier --check \"./**/*.{js,jsx,ts,tsx,json}\"",
     "test:gateway": "jest src/",
+    "test:streams": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.streams.config.js --runInBand",
     "test:parameters": "tsx --test tests/unit/src/services/transformToProviderRequest.node.ts",
     "test:plugins": "jest plugins/",
     "pre-push": "npm run build && node start-test.js",
