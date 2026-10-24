@@ -1,7 +1,129 @@
 import { BEDROCK, OPEN_AI, PERPLEXITY_AI } from '../globals';
 import { PerplexityAIChatCompleteStreamChunkTransform } from '../providers/perplexity-ai/chatComplete';
+import { BedrockChatCompleteStreamChunkTransform } from '../providers/bedrock/chatComplete';
 import { getStreamModeSplitPattern } from '../utils';
 import { handleStreamingMode, readStream } from './streamHandler';
+
+describe('Bedrock Converse stream errors', () => {
+  // AWS EventStream frame: prelude, headers, JSON payload, message CRC.
+  // The reader ignores headers and CRCs; exercise its actual binary framing.
+  function frame(payload: object) {
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    const chunk = new Uint8Array(16 + bytes.length);
+    new DataView(chunk.buffer).setUint32(0, chunk.length);
+    chunk.set(bytes, 12);
+    return chunk;
+  }
+
+  async function stream(
+    payloads: object[],
+    strict: boolean,
+    fragmented = false
+  ) {
+    const response = handleStreamingMode(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const payload of payloads) {
+              const bytes =
+                payload instanceof Uint8Array ? payload : frame(payload);
+              if (fragmented) {
+                for (const byte of bytes)
+                  controller.enqueue(Uint8Array.of(byte));
+              } else controller.enqueue(bytes);
+            }
+            controller.close();
+          },
+        })
+      ),
+      BEDROCK,
+      BedrockChatCompleteStreamChunkTransform,
+      '/chat/completions',
+      strict,
+      { model: 'us.amazon.nova-2-lite-v1:0' },
+      'chatComplete',
+      { beforeRequestHooksResult: [], afterRequestHooksResult: [] }
+    );
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    const events = (await response.text()).trim().split('\n\n');
+    expect(events.pop()).toBe('data: [DONE]');
+    return events.map((event) => JSON.parse(event.slice(6)));
+  }
+
+  it('preserves the error in a captured Nova invalid-image response', async () => {
+    // Synthetic invalid PNG sent directly to Bedrock; no customer input.
+    const bytes = Buffer.from(
+      'AAABEAAAAGH0K8qADzpleGNlcHRpb24tdHlwZQcAE3ZhbGlkYXRpb25FeGNlcHRpb24NOmNvbnRlbnQtdHlwZQcAEGFwcGxpY2F0aW9uL2pzb24NOm1lc3NhZ2UtdHlwZQcACWV4Y2VwdGlvbnsibWVzc2FnZSI6IlRoZSBtb2RlbCByZXR1cm5lZCB0aGUgZm9sbG93aW5nIGVycm9yczogVGhlIGRldGVjdGVkIGZpbGUgTUlNRSB0eXBlIHRleHQvcGxhaW4gaXMgbm90IHN1cHBvcnRlZCBieSB0aGlzIG1vZGVsLiBUcnkgYWdhaW4gd2l0aCBhIHZhbGlkIGZpbGUgdHlwZS4ifX7Fpzg=',
+      'base64'
+    );
+    const events = await stream([bytes], false);
+    expect(events).toHaveLength(1);
+    expect(events[0].error.message).toContain(
+      'The detected file MIME type text/plain is not supported'
+    );
+    expect(events[0].choices).toBeUndefined();
+    expect(events[0].usage).toBeUndefined();
+  });
+
+  it.each([false, true])(
+    'preserves the provider error with strict mode %s',
+    async (strict) => {
+      const events = await stream(
+        [{ message: 'The image could not be decoded.' }],
+        strict
+      );
+      expect(events).toEqual([
+        {
+          error: {
+            message: 'bedrock error: The image could not be decoded.',
+            type: null,
+            param: null,
+            code: null,
+          },
+          provider: BEDROCK,
+        },
+      ]);
+    }
+  );
+
+  it('keeps partial content and the failure when AWS frames cross network chunks', async () => {
+    const events = await stream(
+      [
+        { delta: { text: 'partial reply' }, contentBlockIndex: 0 },
+        { message: 'Service unavailable. Please try again later.' },
+      ],
+      false,
+      true
+    );
+    expect(events).toHaveLength(2);
+    expect(events[0].choices[0].delta.content).toBe('partial reply');
+    expect(events[1].error.message).toContain('Service unavailable.');
+    expect(events[1].choices).toBeUndefined();
+    expect(events[1].usage).toBeUndefined();
+  });
+
+  it.each([false, true])(
+    'retains healthy output and provider usage with strict mode %s',
+    async (strict) => {
+      const events = await stream(
+        [
+          { delta: { text: 'Hello' }, contentBlockIndex: 0 },
+          { stopReason: 'end_turn' },
+          { usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
+        ],
+        strict
+      );
+      expect(events[0].choices[0].delta.content).toBe('Hello');
+      expect(events[2].choices[0].finish_reason).toBe('stop');
+      expect(events[2].usage).toMatchObject({
+        prompt_tokens: 10,
+        completion_tokens: 2,
+        total_tokens: 12,
+      });
+      expect(events.every((event) => !event.error)).toBe(true);
+    }
+  );
+});
 
 describe('Perplexity SSE framing', () => {
   const usage = {

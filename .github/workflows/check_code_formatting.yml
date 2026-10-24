@@ -24,5 +24,8 @@ jobs:
       - name: Test request parameter mappings
         run: npm run test:parameters
 
+      - name: Test stream handling
+        run: npm run test:streams
+
       - name: Check formatting
         run: npm run format:check

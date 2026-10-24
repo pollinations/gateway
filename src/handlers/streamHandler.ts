@@ -101,17 +101,18 @@ export async function* readAWSStream(
       break;
     }
 
+    buffer = concatenateUint8Arrays(buffer, value);
+    if (buffer.length < 4) continue;
+
     if (expectedLength === 0) {
-      expectedLength = readUInt32BE(value, 0);
+      expectedLength = readUInt32BE(buffer, 0);
     }
 
-    buffer = concatenateUint8Arrays(buffer, value);
-
-    while (buffer.length >= expectedLength && buffer.length !== 0) {
+    while (buffer.length >= 4 && buffer.length >= expectedLength) {
       const data = buffer.subarray(0, expectedLength);
       buffer = buffer.subarray(expectedLength);
 
-      expectedLength = readUInt32BE(buffer, 0);
+      expectedLength = buffer.length >= 4 ? readUInt32BE(buffer, 0) : 0;
       const payload = getPayloadFromAWSChunk(data);
 
       if (transformFunction) {
