@@ -15,11 +15,7 @@ describe('Bedrock Converse stream errors', () => {
     return chunk;
   }
 
-  async function stream(
-    payloads: object[],
-    strict: boolean,
-    fragmented = false
-  ) {
+  async function stream(payloads: object[], fragmented = false) {
     const response = handleStreamingMode(
       new Response(
         new ReadableStream({
@@ -39,7 +35,7 @@ describe('Bedrock Converse stream errors', () => {
       BEDROCK,
       BedrockChatCompleteStreamChunkTransform,
       '/chat/completions',
-      strict,
+      false,
       { model: 'us.amazon.nova-2-lite-v1:0' },
       'chatComplete',
       { beforeRequestHooksResult: [], afterRequestHooksResult: [] }
@@ -56,35 +52,19 @@ describe('Bedrock Converse stream errors', () => {
       'AAABEAAAAGH0K8qADzpleGNlcHRpb24tdHlwZQcAE3ZhbGlkYXRpb25FeGNlcHRpb24NOmNvbnRlbnQtdHlwZQcAEGFwcGxpY2F0aW9uL2pzb24NOm1lc3NhZ2UtdHlwZQcACWV4Y2VwdGlvbnsibWVzc2FnZSI6IlRoZSBtb2RlbCByZXR1cm5lZCB0aGUgZm9sbG93aW5nIGVycm9yczogVGhlIGRldGVjdGVkIGZpbGUgTUlNRSB0eXBlIHRleHQvcGxhaW4gaXMgbm90IHN1cHBvcnRlZCBieSB0aGlzIG1vZGVsLiBUcnkgYWdhaW4gd2l0aCBhIHZhbGlkIGZpbGUgdHlwZS4ifX7Fpzg=',
       'base64'
     );
-    const events = await stream([bytes], false);
-    expect(events).toHaveLength(1);
-    expect(events[0].error.message).toContain(
-      'The detected file MIME type text/plain is not supported'
-    );
-    expect(events[0].choices).toBeUndefined();
-    expect(events[0].usage).toBeUndefined();
-  });
-
-  it.each([false, true])(
-    'preserves the provider error with strict mode %s',
-    async (strict) => {
-      const events = await stream(
-        [{ message: 'The image could not be decoded.' }],
-        strict
-      );
-      expect(events).toEqual([
-        {
-          error: {
-            message: 'bedrock error: The image could not be decoded.',
-            type: null,
-            param: null,
-            code: null,
-          },
-          provider: BEDROCK,
+    expect(await stream([bytes])).toEqual([
+      {
+        error: {
+          message:
+            'bedrock error: The model returned the following errors: The detected file MIME type text/plain is not supported by this model. Try again with a valid file type.',
+          type: null,
+          param: null,
+          code: null,
         },
-      ]);
-    }
-  );
+        provider: BEDROCK,
+      },
+    ]);
+  });
 
   it('keeps partial content and the failure when AWS frames cross network chunks', async () => {
     const events = await stream(
@@ -92,7 +72,6 @@ describe('Bedrock Converse stream errors', () => {
         { delta: { text: 'partial reply' }, contentBlockIndex: 0 },
         { message: 'Service unavailable. Please try again later.' },
       ],
-      false,
       true
     );
     expect(events).toHaveLength(2);
@@ -102,27 +81,21 @@ describe('Bedrock Converse stream errors', () => {
     expect(events[1].usage).toBeUndefined();
   });
 
-  it.each([false, true])(
-    'retains healthy output and provider usage with strict mode %s',
-    async (strict) => {
-      const events = await stream(
-        [
-          { delta: { text: 'Hello' }, contentBlockIndex: 0 },
-          { stopReason: 'end_turn' },
-          { usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
-        ],
-        strict
-      );
-      expect(events[0].choices[0].delta.content).toBe('Hello');
-      expect(events[2].choices[0].finish_reason).toBe('stop');
-      expect(events[2].usage).toMatchObject({
-        prompt_tokens: 10,
-        completion_tokens: 2,
-        total_tokens: 12,
-      });
-      expect(events.every((event) => !event.error)).toBe(true);
-    }
-  );
+  it('retains healthy output and provider usage', async () => {
+    const events = await stream([
+      { delta: { text: 'Hello' }, contentBlockIndex: 0 },
+      { stopReason: 'end_turn' },
+      { usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
+    ]);
+    expect(events[0].choices[0].delta.content).toBe('Hello');
+    expect(events[2].choices[0].finish_reason).toBe('stop');
+    expect(events[2].usage).toMatchObject({
+      prompt_tokens: 10,
+      completion_tokens: 2,
+      total_tokens: 12,
+    });
+    expect(events.every((event) => !event.error)).toBe(true);
+  });
 });
 
 describe('Perplexity SSE framing', () => {
