@@ -56,7 +56,7 @@ export function transformGenerationConfig(params: PortkeyGeminiParams) {
     const { budget_tokens, type, reasoning_effort } = params.thinking;
     const thinkingConfig: Record<string, any> = {};
     thinkingConfig['include_thoughts'] =
-      type === 'enabled' || budget_tokens || reasoning_effort ? true : false;
+      (type === 'enabled' || budget_tokens || reasoning_effort) ? true : false;
     thinkingConfig['thinking_budget'] = budget_tokens;
     generationConfig['thinking_config'] = thinkingConfig;
   }
