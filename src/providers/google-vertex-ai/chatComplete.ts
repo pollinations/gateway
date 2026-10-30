@@ -483,12 +483,14 @@ export const GoogleChatCompleteResponseTransform: (
     );
   }
 
-  if (!Array.isArray(response)) {
-    const errorResponse = GoogleErrorResponseTransform(
-      response,
-      GOOGLE_VERTEX_AI
-    );
-    if (errorResponse) return errorResponse;
+  const errorResponse = !Array.isArray(response)
+    ? GoogleErrorResponseTransform(response, GOOGLE_VERTEX_AI)
+    : undefined;
+  if (
+    errorResponse &&
+    !('usageMetadata' in response && response.usageMetadata)
+  ) {
+    return errorResponse;
   }
 
   // sometimes vertex gemini returns usageMetadata without candidates
@@ -512,6 +514,32 @@ export const GoogleChatCompleteResponseTransform: (
       if (curr.modality === VERTEX_MODALITY.AUDIO) return acc + curr.tokenCount;
       return acc;
     }, 0);
+
+    const usage = {
+      prompt_tokens: promptTokenCount,
+      completion_tokens: candidatesTokenCount + thoughtsTokenCount,
+      total_tokens: totalTokenCount,
+      completion_tokens_details: {
+        reasoning_tokens: thoughtsTokenCount,
+        audio_tokens: outputAudioTokens,
+      },
+      prompt_tokens_details: {
+        // The request that created the cachedContents resource is
+        // billed the whole prefix at the standard input rate, so
+        // zero the cached discount for it (see cachedContents.ts).
+        cached_tokens: wasCacheCreated(gatewayRequest)
+          ? 0
+          : cachedContentTokenCount,
+        audio_tokens: inputAudioTokens,
+      },
+      // Report the written prefix on the creating request so
+      // downstream billing can price the create and its cache
+      // storage explicitly (Anthropic usage convention).
+      ...(wasCacheCreated(gatewayRequest) && cachedContentTokenCount > 0
+        ? { cache_creation_input_tokens: cachedContentTokenCount }
+        : {}),
+    };
+    if (errorResponse) return { ...errorResponse, usage };
 
     return {
       id: 'portkey-' + crypto.randomUUID(),
@@ -608,30 +636,7 @@ export const GoogleChatCompleteResponseTransform: (
               : {}),
           };
         }) ?? [],
-      usage: {
-        prompt_tokens: promptTokenCount,
-        completion_tokens: candidatesTokenCount + thoughtsTokenCount,
-        total_tokens: totalTokenCount,
-        completion_tokens_details: {
-          reasoning_tokens: thoughtsTokenCount,
-          audio_tokens: outputAudioTokens,
-        },
-        prompt_tokens_details: {
-          // The request that created the cachedContents resource is
-          // billed the whole prefix at the standard input rate, so
-          // zero the cached discount for it (see cachedContents.ts).
-          cached_tokens: wasCacheCreated(gatewayRequest)
-            ? 0
-            : cachedContentTokenCount,
-          audio_tokens: inputAudioTokens,
-        },
-        // Report the written prefix on the creating request so
-        // downstream billing can price the create and its cache
-        // storage explicitly (Anthropic usage convention).
-        ...(wasCacheCreated(gatewayRequest) && cachedContentTokenCount > 0
-          ? { cache_creation_input_tokens: cachedContentTokenCount }
-          : {}),
-      },
+      usage,
     };
   }
 
