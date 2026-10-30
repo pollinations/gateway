@@ -85,11 +85,30 @@ describe.each([
         total_tokens: 10,
       });
       expect(transform({ candidates: [] }).usage).toBeUndefined();
-      expect(
-        transform({
-          promptFeedback: { blockReason: 'BLOCKED_REASON_UNSPECIFIED' },
-        }).error
-      ).toBeUndefined();
+    });
+
+    it('rejects Google’s documented unspecified prompt block and retains its SSE usage', () => {
+      const payload = {
+        promptFeedback: { blockReason: 'BLOCKED_REASON_UNSPECIFIED' },
+        usageMetadata: { promptTokenCount: 7, totalTokenCount: 7 },
+      };
+      for (const result of [
+        responseTransform(payload as any, 200, new Headers(), false),
+        transform(payload),
+      ]) {
+        expect(result).toMatchObject({
+          provider,
+          error: {
+            code: 'content_policy_violation',
+            type: 'BLOCKED_REASON_UNSPECIFIED',
+          },
+        });
+      }
+      expect(transform(payload).usage).toMatchObject({
+        prompt_tokens: 7,
+        completion_tokens: 0,
+        total_tokens: 7,
+      });
     });
 
     it('keeps upstream errors carried inside a successful HTTP stream', () => {
@@ -100,6 +119,11 @@ describe.each([
             status: 'RESOURCE_EXHAUSTED',
             message: 'Quota exhausted',
           },
+          usageMetadata: {
+            promptTokenCount: 7,
+            candidatesTokenCount: 2,
+            totalTokenCount: 9,
+          },
         })
       ).toMatchObject({
         provider,
@@ -107,6 +131,7 @@ describe.each([
           type: 'RESOURCE_EXHAUSTED',
           message: expect.stringContaining('Quota exhausted'),
         },
+        usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 },
       });
     });
 

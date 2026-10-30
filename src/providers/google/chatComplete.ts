@@ -608,10 +608,7 @@ export const GoogleErrorResponseTransform: (
 
   const feedback =
     'promptFeedback' in response ? response.promptFeedback : undefined;
-  if (
-    feedback?.blockReason &&
-    feedback.blockReason !== 'BLOCKED_REASON_UNSPECIFIED'
-  ) {
+  if (feedback?.blockReason) {
     return generateErrorResponse(
       {
         message:
@@ -784,7 +781,6 @@ export const GoogleChatCompleteStreamChunkTransform: (
   const parsedChunk: GoogleGenerateContentResponse = JSON.parse(chunk);
 
   const errorResponse = GoogleErrorResponseTransform(parsedChunk);
-  if (errorResponse) return `data: ${JSON.stringify(errorResponse)}\n\n`;
 
   let usageMetadata;
   if (parsedChunk.usageMetadata) {
@@ -818,6 +814,14 @@ export const GoogleChatCompleteStreamChunkTransform: (
         ),
       },
     };
+  }
+
+  if (errorResponse) {
+    return `data: ${JSON.stringify({
+      ...errorResponse,
+      model: parsedChunk.modelVersion,
+      usage: usageMetadata,
+    })}\n\n`;
   }
 
   return (

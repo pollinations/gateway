@@ -725,7 +725,6 @@ export const GoogleChatCompleteStreamChunkTransform: (
     parsedChunk,
     GOOGLE_VERTEX_AI
   );
-  if (errorResponse) return `data: ${JSON.stringify(errorResponse)}\n\n`;
 
   let usageMetadata;
   if (parsedChunk.usageMetadata) {
@@ -774,6 +773,14 @@ export const GoogleChatCompleteStreamChunkTransform: (
           }
         : {}),
     };
+  }
+
+  if (errorResponse) {
+    return `data: ${JSON.stringify({
+      ...errorResponse,
+      model: parsedChunk.modelVersion,
+      usage: usageMetadata,
+    })}\n\n`;
   }
 
   const dataChunk = {
