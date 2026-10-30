@@ -507,6 +507,7 @@ export const GoogleChatCompleteConfig: ProviderConfig = {
 };
 
 export interface GoogleErrorResponse {
+  usageMetadata?: GoogleGenerateContentResponse['usageMetadata'];
   error: {
     code: string | number;
     message: string;
@@ -625,6 +626,42 @@ export const GoogleErrorResponseTransform: (
   return undefined;
 };
 
+function googleJsonUsage(
+  metadata: GoogleGenerateContentResponse['usageMetadata']
+) {
+  const {
+    promptTokenCount = 0,
+    candidatesTokenCount = 0,
+    totalTokenCount = 0,
+    thoughtsTokenCount = 0,
+    cachedContentTokenCount = 0,
+    promptTokensDetails = [],
+    candidatesTokensDetails = [],
+  } = metadata;
+  const inputAudioTokens = promptTokensDetails.reduce((acc, curr) => {
+    if (curr.modality === VERTEX_MODALITY.AUDIO) return acc + curr.tokenCount;
+    return acc;
+  }, 0);
+  const outputAudioTokens = candidatesTokensDetails.reduce((acc, curr) => {
+    if (curr.modality === VERTEX_MODALITY.AUDIO) return acc + curr.tokenCount;
+    return acc;
+  }, 0);
+
+  return {
+    prompt_tokens: promptTokenCount,
+    completion_tokens: candidatesTokenCount + thoughtsTokenCount,
+    total_tokens: totalTokenCount,
+    completion_tokens_details: {
+      reasoning_tokens: thoughtsTokenCount,
+      audio_tokens: outputAudioTokens,
+    },
+    prompt_tokens_details: {
+      cached_tokens: cachedContentTokenCount,
+      audio_tokens: inputAudioTokens,
+    },
+  };
+}
+
 export const GoogleChatCompleteResponseTransform: (
   response: GoogleGenerateContentResponse | GoogleErrorResponse,
   responseStatus: number,
@@ -637,26 +674,17 @@ export const GoogleChatCompleteResponseTransform: (
   strictOpenAiCompliance
 ) => {
   const errorResponse = GoogleErrorResponseTransform(response);
-  if (errorResponse) return errorResponse;
+  if (errorResponse) {
+    return {
+      ...errorResponse,
+      ...(response.usageMetadata && {
+        usage: googleJsonUsage(response.usageMetadata),
+      }),
+    };
+  }
 
   if ('candidates' in response) {
-    const {
-      promptTokenCount = 0,
-      candidatesTokenCount = 0,
-      totalTokenCount = 0,
-      thoughtsTokenCount = 0,
-      cachedContentTokenCount = 0,
-      promptTokensDetails = [],
-      candidatesTokensDetails = [],
-    } = response.usageMetadata;
-    const inputAudioTokens = promptTokensDetails.reduce((acc, curr) => {
-      if (curr.modality === VERTEX_MODALITY.AUDIO) return acc + curr.tokenCount;
-      return acc;
-    }, 0);
-    const outputAudioTokens = candidatesTokensDetails.reduce((acc, curr) => {
-      if (curr.modality === VERTEX_MODALITY.AUDIO) return acc + curr.tokenCount;
-      return acc;
-    }, 0);
+    const usage = googleJsonUsage(response.usageMetadata);
 
     return {
       id: 'portkey-' + crypto.randomUUID(),
@@ -729,19 +757,7 @@ export const GoogleChatCompleteResponseTransform: (
               : {}),
           };
         }) ?? [],
-      usage: {
-        prompt_tokens: promptTokenCount,
-        completion_tokens: candidatesTokenCount + thoughtsTokenCount,
-        total_tokens: totalTokenCount,
-        completion_tokens_details: {
-          reasoning_tokens: thoughtsTokenCount,
-          audio_tokens: outputAudioTokens,
-        },
-        prompt_tokens_details: {
-          cached_tokens: cachedContentTokenCount,
-          audio_tokens: inputAudioTokens,
-        },
-      },
+      usage,
     };
   }
 

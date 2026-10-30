@@ -87,7 +87,7 @@ describe.each([
       expect(transform({ candidates: [] }).usage).toBeUndefined();
     });
 
-    it('rejects Google’s documented unspecified prompt block and retains its SSE usage', () => {
+    it('rejects Google’s documented unspecified prompt block and retains its usage', () => {
       const payload = {
         promptFeedback: { blockReason: 'BLOCKED_REASON_UNSPECIFIED' },
         usageMetadata: { promptTokenCount: 7, totalTokenCount: 7 },
@@ -103,36 +103,40 @@ describe.each([
             type: 'BLOCKED_REASON_UNSPECIFIED',
           },
         });
+        expect((result as any).usage).toMatchObject({
+          prompt_tokens: 7,
+          completion_tokens: 0,
+          total_tokens: 7,
+        });
       }
-      expect(transform(payload).usage).toMatchObject({
-        prompt_tokens: 7,
-        completion_tokens: 0,
-        total_tokens: 7,
-      });
     });
 
-    it('keeps upstream errors carried inside a successful HTTP stream', () => {
-      expect(
-        transform({
-          error: {
-            code: 429,
-            status: 'RESOURCE_EXHAUSTED',
-            message: 'Quota exhausted',
-          },
-          usageMetadata: {
-            promptTokenCount: 7,
-            candidatesTokenCount: 2,
-            totalTokenCount: 9,
-          },
-        })
-      ).toMatchObject({
-        provider,
+    it('retains JSON and SSE upstream errors with their usage', () => {
+      const payload = {
         error: {
-          type: 'RESOURCE_EXHAUSTED',
-          message: expect.stringContaining('Quota exhausted'),
+          code: 429,
+          status: 'RESOURCE_EXHAUSTED',
+          message: 'Quota exhausted',
         },
-        usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 },
-      });
+        usageMetadata: {
+          promptTokenCount: 7,
+          candidatesTokenCount: 2,
+          totalTokenCount: 9,
+        },
+      };
+      for (const result of [
+        responseTransform(payload as any, 429, new Headers(), false),
+        transform(payload),
+      ]) {
+        expect(result).toMatchObject({
+          provider,
+          error: {
+            type: 'RESOURCE_EXHAUSTED',
+            message: expect.stringContaining('Quota exhausted'),
+          },
+          usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 },
+        });
+      }
     });
 
     it('preserves filtered candidates without content parts and their reported usage', () => {
