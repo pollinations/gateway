@@ -508,7 +508,7 @@ export const GoogleChatCompleteConfig: ProviderConfig = {
 
 export interface GoogleErrorResponse {
   error: {
-    code: string;
+    code: string | number;
     message: string;
     status: string;
     details: Array<Record<string, any>>;
@@ -563,7 +563,9 @@ export interface GoogleResponseCandidate {
 interface GoogleGenerateContentResponse {
   modelVersion: string;
   candidates: GoogleResponseCandidate[];
-  promptFeedback: {
+  promptFeedback?: {
+    blockReason?: string;
+    blockReasonMessage?: string;
     safetyRatings: {
       category: string;
       probability: string;
@@ -587,7 +589,9 @@ interface GoogleGenerateContentResponse {
 }
 
 export const GoogleErrorResponseTransform: (
-  response: GoogleErrorResponse,
+  response:
+    | GoogleErrorResponse
+    | Pick<GoogleGenerateContentResponse, 'promptFeedback'>,
   provider?: string
 ) => ErrorResponse | undefined = (response, provider = GOOGLE) => {
   if ('error' in response) {
@@ -596,7 +600,26 @@ export const GoogleErrorResponseTransform: (
         message: response.error.message ?? '',
         type: response.error.status ?? null,
         param: null,
-        code: response.error.code ?? null,
+        code: response.error.code == null ? null : String(response.error.code),
+      },
+      provider
+    );
+  }
+
+  const feedback =
+    'promptFeedback' in response ? response.promptFeedback : undefined;
+  if (
+    feedback?.blockReason &&
+    feedback.blockReason !== 'BLOCKED_REASON_UNSPECIFIED'
+  ) {
+    return generateErrorResponse(
+      {
+        message:
+          feedback.blockReasonMessage ||
+          `Prompt blocked: ${feedback.blockReason}`,
+        type: feedback.blockReason,
+        param: null,
+        code: 'content_policy_violation',
       },
       provider
     );
@@ -616,12 +639,8 @@ export const GoogleChatCompleteResponseTransform: (
   _responseHeaders,
   strictOpenAiCompliance
 ) => {
-  if (responseStatus !== 200) {
-    const errorResponse = GoogleErrorResponseTransform(
-      response as GoogleErrorResponse
-    );
-    if (errorResponse) return errorResponse;
-  }
+  const errorResponse = GoogleErrorResponseTransform(response);
+  if (errorResponse) return errorResponse;
 
   if ('candidates' in response) {
     const {
@@ -764,12 +783,15 @@ export const GoogleChatCompleteStreamChunkTransform: (
 
   const parsedChunk: GoogleGenerateContentResponse = JSON.parse(chunk);
 
+  const errorResponse = GoogleErrorResponseTransform(parsedChunk);
+  if (errorResponse) return `data: ${JSON.stringify(errorResponse)}\n\n`;
+
   let usageMetadata;
   if (parsedChunk.usageMetadata) {
     usageMetadata = {
       prompt_tokens: parsedChunk.usageMetadata.promptTokenCount,
       completion_tokens:
-        parsedChunk.usageMetadata.candidatesTokenCount +
+        (parsedChunk.usageMetadata.candidatesTokenCount ?? 0) +
         (parsedChunk.usageMetadata.thoughtsTokenCount ?? 0),
       total_tokens: parsedChunk.usageMetadata.totalTokenCount,
       completion_tokens_details: {
@@ -814,7 +836,7 @@ export const GoogleChatCompleteStreamChunkTransform: (
                 strictOpenAiCompliance
               )
             : null;
-          if (generation.content?.parts[0]?.text) {
+          if (generation.content?.parts?.[0]?.text) {
             const contentBlocks = [];
             let content = '';
             for (const part of generation.content.parts) {
@@ -838,7 +860,7 @@ export const GoogleChatCompleteStreamChunkTransform: (
               ...(!strictOpenAiCompliance &&
                 contentBlocks.length && { content_blocks: contentBlocks }),
             };
-          } else if (generation.content?.parts[0]?.functionCall) {
+          } else if (generation.content?.parts?.[0]?.functionCall) {
             message = {
               role: 'assistant',
               tool_calls: generation.content.parts.map((part, idx) => {
@@ -859,7 +881,7 @@ export const GoogleChatCompleteStreamChunkTransform: (
                 }
               }),
             };
-          } else if (generation.content?.parts[0]?.inlineData) {
+          } else if (generation.content?.parts?.[0]?.inlineData) {
             const part = generation.content.parts[0];
             const contentBlocks = [
               {
@@ -886,7 +908,7 @@ export const GoogleChatCompleteStreamChunkTransform: (
               : {}),
           };
         }) ?? [],
-      ...(parsedChunk.usageMetadata?.candidatesTokenCount && {
+      ...(usageMetadata && {
         usage: usageMetadata,
       }),
     })}` + '\n\n'

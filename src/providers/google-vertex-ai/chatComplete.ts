@@ -28,6 +28,7 @@ import {
   SYSTEM_INSTRUCTION_DISABLED_MODELS,
   transformOpenAIRoleToGoogleRole,
   transformToolChoiceForGemini,
+  GoogleErrorResponseTransform,
 } from '../google/chatComplete';
 import { GOOGLE_GENERATE_CONTENT_FINISH_REASON } from '../google/types';
 import {
@@ -482,17 +483,12 @@ export const GoogleChatCompleteResponseTransform: (
     );
   }
 
-  if (responseStatus !== 200 && 'error' in response) {
-    const { error } = response;
-    return generateErrorResponse(
-      {
-        message: error.message,
-        type: error.status,
-        param: null,
-        code: String(error.code),
-      },
+  if (!Array.isArray(response)) {
+    const errorResponse = GoogleErrorResponseTransform(
+      response,
       GOOGLE_VERTEX_AI
     );
+    if (errorResponse) return errorResponse;
   }
 
   // sometimes vertex gemini returns usageMetadata without candidates
@@ -723,14 +719,20 @@ export const GoogleChatCompleteStreamChunkTransform: (
     return `data: ${chunk}\n\n`;
   }
 
-  let parsedChunk: GoogleGenerateContentResponse = JSON.parse(chunk);
+  const parsedChunk: GoogleGenerateContentResponse = JSON.parse(chunk);
+
+  const errorResponse = GoogleErrorResponseTransform(
+    parsedChunk,
+    GOOGLE_VERTEX_AI
+  );
+  if (errorResponse) return `data: ${JSON.stringify(errorResponse)}\n\n`;
 
   let usageMetadata;
   if (parsedChunk.usageMetadata) {
     usageMetadata = {
       prompt_tokens: parsedChunk.usageMetadata.promptTokenCount,
       completion_tokens:
-        parsedChunk.usageMetadata.candidatesTokenCount +
+        (parsedChunk.usageMetadata.candidatesTokenCount ?? 0) +
         (parsedChunk.usageMetadata.thoughtsTokenCount ?? 0),
       total_tokens: parsedChunk.usageMetadata.totalTokenCount,
       completion_tokens_details: {
@@ -790,7 +792,7 @@ export const GoogleChatCompleteStreamChunkTransform: (
             )
           : null;
         let message: any = { role: 'assistant', content: '' };
-        if (generation.content?.parts[0]?.text) {
+        if (generation.content?.parts?.[0]?.text) {
           const contentBlocks = [];
           let content = '';
           for (const part of generation.content.parts) {
@@ -816,7 +818,7 @@ export const GoogleChatCompleteStreamChunkTransform: (
                 content_blocks: contentBlocks,
               }),
           };
-        } else if (generation.content?.parts[0]?.functionCall) {
+        } else if (generation.content?.parts?.[0]?.functionCall) {
           message = {
             role: 'assistant',
             tool_calls: generation.content.parts.map((part, idx) => {
@@ -837,7 +839,7 @@ export const GoogleChatCompleteStreamChunkTransform: (
               }
             }),
           };
-        } else if (generation.content?.parts[0]?.inlineData) {
+        } else if (generation.content?.parts?.[0]?.inlineData) {
           const part = generation.content.parts[0];
           const contentBlocks = [
             {
@@ -867,7 +869,7 @@ export const GoogleChatCompleteStreamChunkTransform: (
             : {}),
         };
       }) ?? [],
-    ...(parsedChunk.usageMetadata?.candidatesTokenCount && {
+    ...(usageMetadata && {
       usage: usageMetadata,
     }),
   };

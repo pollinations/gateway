@@ -58,7 +58,9 @@ export interface GoogleResponseCandidate {
 export interface GoogleGenerateContentResponse {
   modelVersion: string;
   candidates: GoogleResponseCandidate[];
-  promptFeedback: {
+  promptFeedback?: {
+    blockReason?: string;
+    blockReasonMessage?: string;
     safetyRatings: {
       category: string;
       probability: string;
