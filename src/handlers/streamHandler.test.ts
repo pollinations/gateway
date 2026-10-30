@@ -1,8 +1,195 @@
-import { BEDROCK, OPEN_AI, PERPLEXITY_AI } from '../globals';
+import {
+  BEDROCK,
+  GOOGLE,
+  GOOGLE_VERTEX_AI,
+  OPEN_AI,
+  PERPLEXITY_AI,
+} from '../globals';
+import {
+  GoogleChatCompleteResponseTransform,
+  GoogleChatCompleteStreamChunkTransform,
+} from '../providers/google/chatComplete';
+import {
+  GoogleChatCompleteResponseTransform as vertexResponse,
+  GoogleChatCompleteStreamChunkTransform as vertexStream,
+} from '../providers/google-vertex-ai/chatComplete';
 import { PerplexityAIChatCompleteStreamChunkTransform } from '../providers/perplexity-ai/chatComplete';
 import { BedrockChatCompleteStreamChunkTransform } from '../providers/bedrock/chatComplete';
 import { getStreamModeSplitPattern } from '../utils';
 import { handleStreamingMode, readStream } from './streamHandler';
+
+describe.each([
+  [
+    GOOGLE,
+    GoogleChatCompleteResponseTransform,
+    GoogleChatCompleteStreamChunkTransform,
+  ],
+  [GOOGLE_VERTEX_AI, vertexResponse, vertexStream],
+] as const)(
+  '%s Gemini response metadata',
+  (provider, responseTransform, streamTransform) => {
+    const transform = (payload: object) =>
+      JSON.parse(
+        streamTransform(JSON.stringify(payload), 'test', {}, false).slice(6)
+      );
+    const blocked = {
+      modelVersion: 'gemini-3-flash-preview',
+      promptFeedback: {
+        blockReason: 'SAFETY',
+        blockReasonMessage: 'Test prompt blocked',
+      },
+    };
+
+    it('preserves prompt blocks in JSON and SSE instead of returning an empty completion', () => {
+      for (const result of [
+        responseTransform(blocked as any, 200, new Headers(), false),
+        transform(blocked),
+      ]) {
+        expect(result).toMatchObject({
+          provider,
+          error: { code: 'content_policy_violation', type: 'SAFETY' },
+        });
+        expect((result as any).error.message).toContain('Test prompt blocked');
+        expect((result as any).usage).toBeUndefined();
+      }
+    });
+
+    it.each([0, undefined])(
+      'preserves usage when candidatesTokenCount is %s',
+      (candidatesTokenCount) => {
+        expect(
+          transform({
+            usageMetadata: {
+              promptTokenCount: 10,
+              candidatesTokenCount,
+              totalTokenCount: 15,
+              thoughtsTokenCount: 5,
+            },
+          }).usage
+        ).toMatchObject({
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+        });
+      }
+    );
+
+    it('preserves prompt-only usage and never invents a missing usage block', () => {
+      expect(
+        transform({
+          usageMetadata: { promptTokenCount: 10, totalTokenCount: 10 },
+        }).usage
+      ).toMatchObject({
+        prompt_tokens: 10,
+        completion_tokens: 0,
+        total_tokens: 10,
+      });
+      expect(transform({ candidates: [] }).usage).toBeUndefined();
+    });
+
+    it('rejects Google’s documented unspecified prompt block and retains its SSE usage', () => {
+      const payload = {
+        promptFeedback: { blockReason: 'BLOCKED_REASON_UNSPECIFIED' },
+        usageMetadata: { promptTokenCount: 7, totalTokenCount: 7 },
+      };
+      for (const result of [
+        responseTransform(payload as any, 200, new Headers(), false),
+        transform(payload),
+      ]) {
+        expect(result).toMatchObject({
+          provider,
+          error: {
+            code: 'content_policy_violation',
+            type: 'BLOCKED_REASON_UNSPECIFIED',
+          },
+        });
+      }
+      expect(transform(payload).usage).toMatchObject({
+        prompt_tokens: 7,
+        completion_tokens: 0,
+        total_tokens: 7,
+      });
+    });
+
+    it('keeps upstream errors carried inside a successful HTTP stream', () => {
+      expect(
+        transform({
+          error: {
+            code: 429,
+            status: 'RESOURCE_EXHAUSTED',
+            message: 'Quota exhausted',
+          },
+          usageMetadata: {
+            promptTokenCount: 7,
+            candidatesTokenCount: 2,
+            totalTokenCount: 9,
+          },
+        })
+      ).toMatchObject({
+        provider,
+        error: {
+          type: 'RESOURCE_EXHAUSTED',
+          message: expect.stringContaining('Quota exhausted'),
+        },
+        usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 },
+      });
+    });
+
+    it('preserves filtered candidates without content parts and their reported usage', () => {
+      // Live Vertex safety-filter response to our synthetic test prompt.
+      const result = transform({
+        candidates: [{ content: { role: 'model' }, finishReason: 'SAFETY' }],
+        usageMetadata: {
+          promptTokenCount: 12,
+          candidatesTokenCount: 3,
+          thoughtsTokenCount: 121,
+          totalTokenCount: 136,
+        },
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.choices[0].finish_reason).toBe('content_filter');
+      expect(result.usage).toMatchObject({
+        prompt_tokens: 12,
+        completion_tokens: 124,
+        total_tokens: 136,
+      });
+    });
+  }
+);
+
+it('preserves Vertex prompt-block errors across fragmented SSE transport', async () => {
+  const bytes = new TextEncoder().encode(
+    'data: ' +
+      JSON.stringify({
+        promptFeedback: { blockReason: 'PROHIBITED_CONTENT' },
+        modelVersion: 'gemini-3-flash-preview',
+      }) +
+      '\r\n\r\n'
+  );
+  const response = handleStreamingMode(
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const byte of bytes) controller.enqueue(Uint8Array.of(byte));
+          controller.close();
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } }
+    ),
+    GOOGLE_VERTEX_AI,
+    vertexStream,
+    '/publishers/google/models/gemini-3-flash-preview:streamGenerateContent',
+    false,
+    { model: 'gemini-3-flash-preview' },
+    'chatComplete',
+    { beforeRequestHooksResult: [], afterRequestHooksResult: [] }
+  );
+  const events = (await response.text()).trim().split('\n\n');
+  expect(events).toHaveLength(1);
+  expect(JSON.parse(events[0].slice(6))).toMatchObject({
+    error: { code: 'content_policy_violation', type: 'PROHIBITED_CONTENT' },
+  });
+});
 
 describe('Bedrock Converse stream errors', () => {
   // AWS EventStream frame: prelude, headers, JSON payload, message CRC.
